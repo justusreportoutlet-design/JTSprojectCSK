@@ -207,7 +207,6 @@ export interface OutletConfig {
   type: string; // e.g. 'REGULAR OUTLET', 'PRIME OUTLET', 'FOOD COURT', 'INDONESIAN'
   createdAt?: string;
   isDeleted?: boolean;
-  isActive?: boolean;
 }
 
 export interface BankingPromoItem {

@@ -54,47 +54,36 @@ export const markOutletDeleted = (name: string) => {
   } catch (e) {}
 };
 
-export const getActiveOutletConfigs = (customOutlets?: OutletConfig[], includeInactive = false): OutletConfig[] => {
+export const getActiveOutletConfigs = (customOutlets?: OutletConfig[]): OutletConfig[] => {
   const deletedSet = new Set(getDeletedOutletNames());
   const defaultNames = new Set(DEFAULT_OUTLET_CONFIGS.map(d => d.name));
 
-  let list: OutletConfig[] = [];
   if (customOutlets && Array.isArray(customOutlets) && customOutlets.length > 0) {
-    list = customOutlets;
-  } else {
-    try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('APP_OUTLET_CONFIGS') : null;
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          list = [...parsed];
-        }
+    return customOutlets.filter(o => !o.isDeleted && (!deletedSet.has(o.name) || defaultNames.has(o.name)));
+  }
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('APP_OUTLET_CONFIGS') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const merged = [...parsed];
+        // Ensure all core 8 outlets exist
+        DEFAULT_OUTLET_CONFIGS.forEach(def => {
+          if (!merged.some((m: any) => m.name === def.name)) {
+            merged.push(def);
+          }
+        });
+        return merged.filter((o: any) => !o.isDeleted && (!deletedSet.has(o.name) || defaultNames.has(o.name)));
       }
-    } catch (e) {
-      // fallback
     }
+  } catch (e) {
+    // fallback
   }
-
-  if (list.length === 0) {
-    list = [...DEFAULT_OUTLET_CONFIGS];
-  } else {
-    // Ensure all core default outlets exist unless explicitly marked deleted
-    DEFAULT_OUTLET_CONFIGS.forEach(def => {
-      if (!list.some(m => m.name === def.name)) {
-        list.push(def);
-      }
-    });
-  }
-
-  return list.filter(o => {
-    if (o.isDeleted || deletedSet.has(o.name)) return false;
-    if (!includeInactive && o.isActive === false) return false;
-    return true;
-  });
+  return DEFAULT_OUTLET_CONFIGS;
 };
 
-export const getActiveOutletNames = (customOutlets?: OutletConfig[], includeInactive = false): string[] => {
-  const configs = getActiveOutletConfigs(customOutlets, includeInactive);
+export const getActiveOutletNames = (customOutlets?: OutletConfig[]): string[] => {
+  const configs = getActiveOutletConfigs(customOutlets);
   return configs.map(c => c.name);
 };
 
@@ -115,7 +104,7 @@ export const getActiveRegionalAreas = (activeNames?: string[]): Record<string, O
   // Populate from active configs first
   const configs = getActiveOutletConfigs();
   configs.forEach(cfg => {
-    if (cfg.isDeleted || cfg.isActive === false || !activeSet.has(cfg.name)) return;
+    if (cfg.isDeleted || !activeSet.has(cfg.name)) return;
     const area = cfg.area || 'JAKARTA';
     const normalizedArea = area.toUpperCase().includes('BEKASI') || area.toUpperCase().includes('CIBUBUR')
       ? 'BEKASI & CIBUBUR'
@@ -141,6 +130,17 @@ export const getActiveRegionalAreas = (activeNames?: string[]): Record<string, O
   return areas;
 };
 
+export const saveActiveOutletConfigs = (configs: OutletConfig[]) => {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('APP_OUTLET_CONFIGS', JSON.stringify(configs));
+      window.dispatchEvent(new CustomEvent('appOutletConfigsChanged', { detail: configs }));
+    }
+  } catch (e) {
+    console.error('Failed to save outlet configs to localStorage', e);
+  }
+};
+
 export const OUTLETS: Outlet[] = [
   'SH CIPETE',
   'SH KEMANG',
@@ -151,34 +151,6 @@ export const OUTLETS: Outlet[] = [
   'SH BEKASI',
   'SH CIBUBUR'
 ];
-
-export const refreshOutletsArray = () => {
-  try {
-    const activeNames = getActiveOutletNames();
-    if (activeNames && activeNames.length > 0) {
-      OUTLETS.length = 0;
-      activeNames.forEach(name => {
-        OUTLETS.push(name as Outlet);
-      });
-    }
-  } catch (e) {}
-};
-
-try {
-  refreshOutletsArray();
-} catch {}
-
-export const saveActiveOutletConfigs = (configs: OutletConfig[]) => {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('APP_OUTLET_CONFIGS', JSON.stringify(configs));
-      refreshOutletsArray();
-      window.dispatchEvent(new CustomEvent('appOutletConfigsChanged', { detail: configs }));
-    }
-  } catch (e) {
-    console.error('Failed to save outlet configs to localStorage', e);
-  }
-};
 
 export const REGIONAL_AREAS: Record<string, Outlet[]> = {
   'JAKARTA': [
@@ -578,70 +550,19 @@ export const DEFAULT_BANKING_PROMOS: BankingPromoItem[] = [
   }
 ];
 
-export const getDeletedBankPromoIds = (): string[] => {
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem('APP_DELETED_BANK_PROMO_IDS');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    }
-  } catch (e) {}
-  return [];
-};
-
-export const markBankPromoDeleted = (id: string) => {
-  try {
-    if (typeof window !== 'undefined') {
-      const deleted = getDeletedBankPromoIds();
-      if (!deleted.includes(id)) {
-        deleted.push(id);
-        localStorage.setItem('APP_DELETED_BANK_PROMO_IDS', JSON.stringify(deleted));
-      }
-    }
-  } catch (e) {}
-};
-
-export const getStoredBankPromos = (includeInactive = false): BankingPromoItem[] => {
-  const deletedSet = new Set(getDeletedBankPromoIds());
-  const map = new Map<string, BankingPromoItem>();
-
-  DEFAULT_BANKING_PROMOS.forEach(p => {
-    if (!deletedSet.has(p.id)) map.set(p.id, p);
-  });
-
+export const getStoredBankPromos = (): BankingPromoItem[] => {
   try {
     if (typeof window !== 'undefined') {
       const raw = localStorage.getItem('APP_PROMO_SETTINGS');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed?.customBankPromos)) {
-          parsed.customBankPromos.forEach((p: BankingPromoItem) => {
-            if (p && p.id && !deletedSet.has(p.id)) {
-              map.set(p.id, p);
-            }
-          });
+        if (Array.isArray(parsed?.customBankPromos) && parsed.customBankPromos.length > 0) {
+          return parsed.customBankPromos;
         }
       }
     }
   } catch (e) {}
-
-  const merged = Array.from(map.values());
-  if (includeInactive) return merged;
-  return merged.filter(p => p.isActive !== false);
-};
-
-export const saveStoredBankPromos = (items: BankingPromoItem[]) => {
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem('APP_PROMO_SETTINGS');
-      const parsed = raw ? JSON.parse(raw) : {};
-      const updated = { ...parsed, customBankPromos: items };
-      localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(updated));
-      window.dispatchEvent(new CustomEvent('appPromoSettingsChanged', { detail: updated }));
-    }
-  } catch (e) {}
+  return DEFAULT_BANKING_PROMOS;
 };
 
 export const DEFAULT_STRATEGY_MENU_CATALOG: StrategyMenuItem[] = [
@@ -659,58 +580,19 @@ export const DEFAULT_STRATEGY_MENU_CATALOG: StrategyMenuItem[] = [
   { id: 'strat_10', name: 'Surf & Turf Prime Feast', category: 'PERCEPATAN', price: 265000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' }
 ];
 
-export const getDeletedStrategyIds = (): string[] => {
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem('APP_DELETED_STRATEGY_IDS');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    }
-  } catch (e) {}
-  return [];
-};
-
-export const markStrategyDeleted = (id: string) => {
-  try {
-    if (typeof window !== 'undefined') {
-      const deleted = getDeletedStrategyIds();
-      if (!deleted.includes(id)) {
-        deleted.push(id);
-        localStorage.setItem('APP_DELETED_STRATEGY_IDS', JSON.stringify(deleted));
-      }
-    }
-  } catch (e) {}
-};
-
-export const getStoredStrategyCatalog = (includeInactive = false): StrategyMenuItem[] => {
-  const deletedSet = new Set(getDeletedStrategyIds());
-  const map = new Map<string, StrategyMenuItem>();
-
-  DEFAULT_STRATEGY_MENU_CATALOG.forEach(it => {
-    if (!deletedSet.has(it.id)) map.set(it.id, it);
-  });
-
+export const getStoredStrategyCatalog = (): StrategyMenuItem[] => {
   try {
     if (typeof window !== 'undefined') {
       const raw = localStorage.getItem('APP_STRATEGY_CATALOG');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((it: StrategyMenuItem) => {
-            if (it && it.id && !deletedSet.has(it.id)) {
-              map.set(it.id, it);
-            }
-          });
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
         }
       }
     }
   } catch (e) {}
-
-  const merged = Array.from(map.values());
-  if (includeInactive) return merged;
-  return merged.filter(it => it.isActive !== false);
+  return DEFAULT_STRATEGY_MENU_CATALOG;
 };
 
 export const saveStoredStrategyCatalog = (items: StrategyMenuItem[]) => {

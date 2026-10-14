@@ -11,11 +11,7 @@ import {
   DEFAULT_BANKING_PROMOS,
   DEFAULT_STRATEGY_MENU_CATALOG,
   getStoredStrategyCatalog,
-  saveStoredStrategyCatalog,
-  getStoredBankPromos,
-  saveStoredBankPromos,
-  markBankPromoDeleted,
-  markStrategyDeleted
+  saveStoredStrategyCatalog
 } from '../constants';
 import { doc, getDoc, setDoc, onSnapshot, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -43,8 +39,8 @@ export const OutletControlModal: React.FC<Props> = ({
     }
   }, [isOpen, initialTab]);
 
-  // Outlet State (Include inactive so admin can manage & toggle them)
-  const [outletConfigs, setOutletConfigs] = useState<OutletConfig[]>(() => getActiveOutletConfigs(undefined, true));
+  // Outlet State
+  const [outletConfigs, setOutletConfigs] = useState<OutletConfig[]>(() => getActiveOutletConfigs());
   const [outletSearch, setOutletSearch] = useState('');
   const [outletAreaFilter, setOutletAreaFilter] = useState('ALL');
   const [outletTypeFilter, setOutletTypeFilter] = useState('ALL');
@@ -84,9 +80,18 @@ export const OutletControlModal: React.FC<Props> = ({
     return { bankPromoEnabled: true, promoEnabled: true };
   });
 
-  // Custom Promos Management State (Include inactive)
+  // Custom Promos Management State
   const [bankPromosList, setBankPromosList] = useState<BankingPromoItem[]>(() => {
-    return getStoredBankPromos(true);
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('APP_PROMO_SETTINGS') : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.customBankPromos) && parsed.customBankPromos.length > 0) {
+          return parsed.customBankPromos;
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_BANKING_PROMOS;
   });
 
   const [showPromoModal, setShowPromoModal] = useState(false);
@@ -103,8 +108,8 @@ export const OutletControlModal: React.FC<Props> = ({
   const [promoPeriodYear, setPromoPeriodYear] = useState<number>(new Date().getFullYear());
   const [promoScope, setPromoScope] = useState<'PERIOD' | 'GLOBAL'>('PERIOD');
 
-  // Strategy Catalog State (Kategori Menu Penyeimbang & Percepatan - Include inactive)
-  const [strategyCatalog, setStrategyCatalog] = useState<StrategyMenuItem[]>(() => getStoredStrategyCatalog(true));
+  // Strategy Catalog State (Kategori Menu Penyeimbang & Percepatan)
+  const [strategyCatalog, setStrategyCatalog] = useState<StrategyMenuItem[]>(() => getStoredStrategyCatalog());
   const [strategySearch, setStrategySearch] = useState('');
   const [strategyCategoryFilter, setStrategyCategoryFilter] = useState<'ALL' | 'PENYEIMBANG' | 'PERCEPATAN'>('ALL');
   const [showStrategyModal, setShowStrategyModal] = useState(false);
@@ -128,10 +133,6 @@ export const OutletControlModal: React.FC<Props> = ({
           saveActiveOutletConfigs(data.outlets);
           onOutletsChange?.(data.outlets);
         }
-      } else {
-        // Auto-seed active outlets to Firestore
-        const currentActive = getActiveOutletConfigs();
-        setDoc(outletDocRef, { outlets: currentActive, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
       }
     }, (err) => {
       console.warn('[OutletControl] Listener notice for outlet_control:', err);
@@ -152,11 +153,6 @@ export const OutletControlModal: React.FC<Props> = ({
             window.dispatchEvent(new CustomEvent('appPromoSettingsChanged', { detail: data }));
           }
         } catch (e) {}
-      } else {
-        // Auto-seed promo settings to Firestore
-        const defaultPromos = getStoredBankPromos();
-        const initData = { bankPromoEnabled: true, promoEnabled: true, customBankPromos: defaultPromos, updatedAt: new Date().toISOString() };
-        setDoc(promoDocRef, initData, { merge: true }).catch(() => {});
       }
     }, (err) => {
       console.warn('[OutletControl] Listener notice for promo_settings:', err);
@@ -171,10 +167,6 @@ export const OutletControlModal: React.FC<Props> = ({
           setStrategyCatalog(data.items);
           saveStoredStrategyCatalog(data.items);
         }
-      } else {
-        // Auto-seed strategy catalog to Firestore
-        const currentItems = getStoredStrategyCatalog();
-        setDoc(stratDocRef, { items: currentItems, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
       }
     }, (err) => {
       console.warn('[OutletControl] Listener notice for strategy_catalog:', err);
@@ -232,30 +224,6 @@ export const OutletControlModal: React.FC<Props> = ({
       console.warn('[OutletControl] Failed to write outlet to cloud:', e);
     }
 
-    try {
-      const outletDocRef = doc(db, 'dashboards', finalName);
-      await setDoc(outletDocRef, {
-        outlet: finalName,
-        isDeleted: false,
-        updatedAt: serverTimestamp(),
-        lastUpdatedBy: 'outlet-control'
-      }, { merge: true });
-    } catch (e) {
-      console.warn('[OutletControl] Failed to init dashboard doc on cloud:', e);
-    }
-
-    try {
-      fetch('/api/sync/system-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outlets: updated })
-      }).catch(() => {});
-    } catch (e) {}
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('appOutletConfigsChanged', { detail: updated }));
-    }
-
     setShowAddModal(false);
     setNewOutletName('');
     setCustomAreaText('');
@@ -279,14 +247,6 @@ export const OutletControlModal: React.FC<Props> = ({
     } catch (e) {
       console.warn('[OutletControl] Failed to delete outlet on cloud:', e);
     }
-
-    try {
-      fetch('/api/sync/system-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outlets: updated })
-      }).catch(() => {});
-    } catch (e) {}
 
     try {
       const outletDocRef = doc(db, 'dashboards', outletToDelete.name);
@@ -364,51 +324,8 @@ export const OutletControlModal: React.FC<Props> = ({
       console.warn('[OutletControl] Failed to update outlet on cloud:', e);
     }
 
-    try {
-      fetch('/api/sync/system-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outlets: updated })
-      }).catch(() => {});
-    } catch (e) {}
-
     showToast?.(`Outlet ${finalName} berhasil diperbarui (Area: ${finalArea}, Jenis: ${finalType})`, 'success');
     setOutletToEdit(null);
-  };
-
-  const handleToggleOutletActive = async (outletId: string) => {
-    const updated = outletConfigs.map(o => {
-      if (o.id === outletId || o.name === outletId) {
-        return { ...o, isActive: o.isActive !== false ? false : true };
-      }
-      return o;
-    });
-
-    setOutletConfigs(updated);
-    saveActiveOutletConfigs(updated);
-    onOutletsChange?.(updated);
-
-    try {
-      const ref = doc(db, 'system_config', 'outlet_control');
-      await setDoc(ref, { outlets: updated, updatedAt: new Date().toISOString() }, { merge: true });
-    } catch (e) {
-      console.warn('[OutletControl] Failed to toggle outlet on cloud:', e);
-    }
-
-    try {
-      fetch('/api/sync/system-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outlets: updated })
-      }).catch(() => {});
-    } catch (e) {}
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('appOutletConfigsChanged', { detail: updated }));
-    }
-
-    const item = updated.find(o => o.id === outletId || o.name === outletId);
-    showToast?.(`Outlet ${item?.name || outletId} berhasil di-${item?.isActive !== false ? 'Aktifkan' : 'Nonaktifkan'}!`, 'success');
   };
 
   // Promo Handlers
@@ -448,14 +365,6 @@ export const OutletControlModal: React.FC<Props> = ({
           }, { merge: true });
         } catch (err) {}
       }
-
-      try {
-        fetch('/api/sync/system-config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customBankPromos: targetPromoList })
-        }).catch(() => {});
-      } catch (e) {}
     } catch (err) {
       console.warn('[OutletControl] Sync promo error:', err);
     }
@@ -624,7 +533,6 @@ export const OutletControlModal: React.FC<Props> = ({
 
   const handleConfirmDeletePromo = async () => {
     if (!promoToDelete) return;
-    markBankPromoDeleted(promoToDelete.id);
     const updatedList = bankPromosList.filter(p => p.id !== promoToDelete.id);
     setBankPromosList(updatedList);
 
@@ -646,14 +554,6 @@ export const OutletControlModal: React.FC<Props> = ({
       saveStoredStrategyCatalog(newList);
       const catRef = doc(db, 'system_config', 'strategy_catalog');
       await setDoc(catRef, { items: newList, updatedAt: new Date().toISOString() }, { merge: true });
-
-      try {
-        fetch('/api/sync/system-config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strategyCatalog: newList })
-        }).catch(() => {});
-      } catch (e) {}
     } catch (err) {
       console.warn('[OutletControl] Sync strategy catalog error:', err);
     }
@@ -730,7 +630,6 @@ export const OutletControlModal: React.FC<Props> = ({
 
   const handleConfirmDeleteStrategy = async () => {
     if (!strategyToDelete) return;
-    markStrategyDeleted(strategyToDelete.id);
     const updated = strategyCatalog.filter(it => it.id !== strategyToDelete.id);
     setStrategyCatalog(updated);
     await syncStrategyCatalogEverywhere(updated);
@@ -791,38 +690,38 @@ export const OutletControlModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('OUTLETS')}
-            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap cursor-pointer ${
+            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap ${
               activeTab === 'OUTLETS'
                 ? 'bg-slate-900 text-amber-400 border-amber-400 shadow-md'
                 : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
             }`}
           >
             <i className="fas fa-store"></i>
-            Tambah & Master Outlet ({outletConfigs.length})
+            Master Outlet ({outletConfigs.length})
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('PROMO')}
-            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap cursor-pointer ${
+            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap ${
               activeTab === 'PROMO'
                 ? 'bg-slate-900 text-indigo-400 border-indigo-400 shadow-md'
                 : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
             }`}
           >
             <i className="fas fa-tags"></i>
-            Daftar & Penambahan Promo Banking ({bankPromosList.length})
+            Kontrol Bank & Diskon Promo
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('STRATEGI')}
-            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap cursor-pointer ${
+            className={`px-5 py-3 rounded-t-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all border-b-2 whitespace-nowrap ${
               activeTab === 'STRATEGI'
                 ? 'bg-slate-900 text-purple-400 border-purple-400 shadow-md'
                 : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
             }`}
           >
             <i className="fas fa-chess"></i>
-            Katalog Menu Penyeimbang & Percepatan ({strategyCatalog.length})
+            Menu Strategi ({strategyCatalog.length})
           </button>
         </div>
 
@@ -928,19 +827,9 @@ export const OutletControlModal: React.FC<Props> = ({
                             </span>
                           </td>
                           <td className="py-3.5 px-5 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleOutletActive(outlet.id || outlet.name)}
-                              className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border flex items-center justify-center gap-1.5 mx-auto ${
-                                outlet.isActive !== false
-                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30'
-                                  : 'bg-rose-500/20 text-rose-400 border-rose-500/30 hover:bg-rose-500/30'
-                              }`}
-                              title={outlet.isActive !== false ? 'Klik untuk nonaktifkan outlet' : 'Klik untuk aktifkan outlet'}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${outlet.isActive !== false ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
-                              {outlet.isActive !== false ? 'Aktif' : 'Nonaktif'}
-                            </button>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Aktif
+                            </span>
                           </td>
                           <td className="py-3.5 px-5 text-center">
                             <div className="flex items-center justify-center gap-2">

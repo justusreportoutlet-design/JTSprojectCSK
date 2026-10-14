@@ -55,57 +55,16 @@ function writeOutletsData(data: Record<string, any>) {
   }
 }
 
-const DEFAULT_SYNC_BANK_PROMOS = [
-  {
-    id: 'digibank',
-    name: 'Digibank by DBS',
-    terms: 'All F&B - JKT/TGR/BKS Disc Rp 150.000 min purchase Rp 1.250.000',
-    isActive: true,
-    targetOutlets: ['ALL']
-  },
-  {
-    id: 'bank_mega',
-    name: 'Bank MEGA',
-    terms: 'All F&B Disc 15% min purchase Rp 650.000 max disc Rp 150.000',
-    isActive: true,
-    targetOutlets: ['ALL']
-  }
-];
-
-const DEFAULT_SYNC_STRATEGY_CATALOG = [
-  { id: 'strat_1', name: 'Ribeye Prime 200gr', category: 'PENYEIMBANG', price: 185000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_2', name: 'Sirloin US Beef 200gr', category: 'PENYEIMBANG', price: 165000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_3', name: 'Cream of Mushroom Soup', category: 'PENYEIMBANG', price: 38000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_4', name: 'Chicken Cordon Bleu', category: 'PENYEIMBANG', price: 85000, session: 'LUNCH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_5', name: 'Justus Ice Lemon Tea Pitcher', category: 'PENYEIMBANG', price: 45000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_6', name: 'Australian Wagyu MB5 Tenderloin', category: 'PERCEPATAN', price: 295000, session: 'DINNER', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_7', name: 'Tomahawk Meltique 500gr', category: 'PERCEPATAN', price: 385000, session: 'DINNER', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_8', name: 'Family Sharing Platter 4 Pax', category: 'PERCEPATAN', price: 450000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_9', name: 'Combo Steak & Pasta Special', category: 'PERCEPATAN', price: 135000, session: 'LUNCH', isActive: true, createdAt: '2026-01-01' },
-  { id: 'strat_10', name: 'Surf & Turf Prime Feast', category: 'PERCEPATAN', price: 265000, session: 'BOTH', isActive: true, createdAt: '2026-01-01' }
-];
-
 function readSystemConfig(): any {
   try {
     if (fs.existsSync(SYSTEM_CONFIG_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(SYSTEM_CONFIG_FILE, "utf-8"));
-      return {
-        outlets: parsed.outlets || DEFAULT_SYNC_OUTLETS,
-        customBankPromos: parsed.customBankPromos || DEFAULT_SYNC_BANK_PROMOS,
-        strategyCatalog: parsed.strategyCatalog || DEFAULT_SYNC_STRATEGY_CATALOG,
-        maxDailyInputs: parsed.maxDailyInputs ?? 2500,
-        onlineTimeLimit: parsed.onlineTimeLimit ?? 1440,
-        maxOnlineUsers: parsed.maxOnlineUsers ?? 10,
-        updatedAt: parsed.updatedAt || new Date().toISOString()
-      };
+      return JSON.parse(fs.readFileSync(SYSTEM_CONFIG_FILE, "utf-8"));
     }
   } catch (err) {
     console.warn("Failed reading system_config.json:", err);
   }
   return {
     outlets: DEFAULT_SYNC_OUTLETS,
-    customBankPromos: DEFAULT_SYNC_BANK_PROMOS,
-    strategyCatalog: DEFAULT_SYNC_STRATEGY_CATALOG,
     maxDailyInputs: 2500,
     onlineTimeLimit: 1440,
     maxOnlineUsers: 10,
@@ -270,35 +229,6 @@ async function startServer() {
       const current = readSystemConfig();
       const next = { ...current, ...updates, updatedAt: new Date().toISOString() };
       writeSystemConfig(next);
-
-      if (Array.isArray(updates.outlets)) {
-        const outlets = readOutletsData();
-        let changed = false;
-        updates.outlets.forEach((o: any) => {
-          if (o && o.name) {
-            if (!outlets[o.name]) {
-              outlets[o.name] = {
-                outlet: o.name,
-                area: o.area || 'JAKARTA',
-                type: o.type || 'REGULAR OUTLET',
-                isActive: o.isActive !== false,
-                isDeleted: false,
-                updatedAt: new Date().toISOString(),
-                data: {}
-              };
-              changed = true;
-            } else if (o.isActive !== undefined && outlets[o.name].isActive !== o.isActive) {
-              outlets[o.name].isActive = o.isActive;
-              outlets[o.name].updatedAt = new Date().toISOString();
-              changed = true;
-            }
-          }
-        });
-        if (changed) {
-          writeOutletsData(outlets);
-        }
-      }
-
       res.json({ success: true, config: next });
     } catch (error) {
       res.status(500).json({ error: "Failed to update system config" });
