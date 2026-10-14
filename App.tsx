@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ModuleType, AppState, User, SyncStatus, Outlet, Notification, LeaveRecord } from './types';
-import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames } from './constants';
+import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames, saveActiveOutletConfigs, saveStoredBankPromos, saveStoredStrategyCatalog } from './constants';
 import { fetchUserData, saveGlobalData, saveOutletData, startRealtimeListener, startNotificationListener, isQuotaExceeded, resetQuotaExceeded, fetchAllOutletsData, startAllOutletsListener, testConnection } from './services/cloudService';
 import { safeStorage, safeClipboard, safeWindow } from './lib/safeStorage';
 import { toLocalDateStr } from './lib/dateUtils';
@@ -204,7 +204,8 @@ const App: React.FC = () => {
   const [quotaExceededState, setQuotaExceededState] = useState(isQuotaExceeded());
   const [isPublicView, setIsPublicView] = useState(false);
   const [isOutletControlOpen, setIsOutletControlOpen] = useState(false);
-  const [outletControlTab, setOutletControlTab] = useState<'OUTLETS' | 'PROMO'>('OUTLETS');
+  const [outletControlTab, setOutletControlTab] = useState<'OUTLETS' | 'PROMO' | 'STRATEGI'>('OUTLETS');
+  const [, setOutletConfigsVersion] = useState(0);
 
   useEffect(() => {
     const handleOpenOutletControl = (e: any) => {
@@ -217,6 +218,56 @@ const App: React.FC = () => {
     };
     window.addEventListener('openOutletControl', handleOpenOutletControl);
     return () => window.removeEventListener('openOutletControl', handleOpenOutletControl);
+  }, []);
+
+  // Global Realtime Listeners for Outlet Control, Promo Banking & Menu Strategi Catalog
+  useEffect(() => {
+    const handleSyncChange = () => setOutletConfigsVersion(v => v + 1);
+    window.addEventListener('appOutletConfigsChanged', handleSyncChange);
+    window.addEventListener('appPromoSettingsChanged', handleSyncChange);
+    window.addEventListener('appStrategyCatalogChanged', handleSyncChange);
+
+    const outletRef = doc(db, 'system_config', 'outlet_control');
+    const unsubOutlet = onSnapshot(outletRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (Array.isArray(d.outlets) && d.outlets.length > 0) {
+          saveActiveOutletConfigs(d.outlets);
+          setOutletConfigsVersion(v => v + 1);
+        }
+      }
+    }, () => {});
+
+    const promoRef = doc(db, 'system_config', 'promo_settings');
+    const unsubPromo = onSnapshot(promoRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (Array.isArray(d.customBankPromos) && d.customBankPromos.length > 0) {
+          saveStoredBankPromos(d.customBankPromos);
+          setOutletConfigsVersion(v => v + 1);
+        }
+      }
+    }, () => {});
+
+    const stratRef = doc(db, 'system_config', 'strategy_catalog');
+    const unsubStrat = onSnapshot(stratRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (Array.isArray(d.items) && d.items.length > 0) {
+          saveStoredStrategyCatalog(d.items);
+          setOutletConfigsVersion(v => v + 1);
+        }
+      }
+    }, () => {});
+
+    return () => {
+      window.removeEventListener('appOutletConfigsChanged', handleSyncChange);
+      window.removeEventListener('appPromoSettingsChanged', handleSyncChange);
+      window.removeEventListener('appStrategyCatalogChanged', handleSyncChange);
+      unsubOutlet();
+      unsubPromo();
+      unsubStrat();
+    };
   }, []);
 
   const lastSyncedGlobal = useRef<Record<string, string>>({});
@@ -234,9 +285,23 @@ const App: React.FC = () => {
     fetch('/api/sync/system-config')
       .then(res => res.json())
       .then(data => {
-        if (data?.config?.maxDailyInputs !== undefined) {
-          maxDailyInputLimitRef.current = data.config.maxDailyInputs;
-          localStorage.setItem('MAX_DAILY_INPUT_LIMIT', data.config.maxDailyInputs.toString());
+        if (data?.config) {
+          if (data.config.maxDailyInputs !== undefined) {
+            maxDailyInputLimitRef.current = data.config.maxDailyInputs;
+            localStorage.setItem('MAX_DAILY_INPUT_LIMIT', data.config.maxDailyInputs.toString());
+          }
+          if (Array.isArray(data.config.outlets) && data.config.outlets.length > 0) {
+            saveActiveOutletConfigs(data.config.outlets);
+            setOutletConfigsVersion(v => v + 1);
+          }
+          if (Array.isArray(data.config.customBankPromos) && data.config.customBankPromos.length > 0) {
+            saveStoredBankPromos(data.config.customBankPromos);
+            setOutletConfigsVersion(v => v + 1);
+          }
+          if (Array.isArray(data.config.strategyCatalog) && data.config.strategyCatalog.length > 0) {
+            saveStoredStrategyCatalog(data.config.strategyCatalog);
+            setOutletConfigsVersion(v => v + 1);
+          }
         }
       })
       .catch(() => {});
@@ -1950,6 +2015,7 @@ const App: React.FC = () => {
               isAdmin={isAdmin} 
               onToggleFS={toggleFullScreen} 
               onOpenLogisticsInput={() => setShowLogisticsInputModal(true)} 
+              selectedOutlet={user.selectedOutlet}
             />
           );
         case ModuleType.SALES:
@@ -2312,6 +2378,11 @@ const App: React.FC = () => {
         onClose={() => setIsOutletControlOpen(false)}
         initialTab={outletControlTab}
         showToast={showToast}
+        onOutletsChange={(newConfigs) => {
+          saveActiveOutletConfigs(newConfigs);
+          setOutletConfigsVersion(v => v + 1);
+          setSyncTrigger(prev => prev + 1);
+        }}
       />
     </div>
   );
