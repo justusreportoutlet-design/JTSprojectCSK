@@ -1,11 +1,12 @@
 {
-  "projectId": "gen-lang-client-0253358326",
-  "appId": "1:293805604015:web:87d24722b8358dbb70685a",
-  "apiKey": "AIzaSyC1TqRUpUj88q7ObqbSf8eut4JyeHK-7TA",
-  "authDomain": "gen-lang-client-0253358326.firebaseapp.com",
-  "storageBucket": "gen-lang-client-0253358326.firebasestorage.app",
-  "messagingSenderId": "293805604015",
-  "measurementId": "",
+  "projectId": "christian-project-3cf5c",
+  "appId": "1:701163493751:web:83e345b694049db5fde972",
+  "apiKey": "AIzaSyDRb6zMxT9YvBs0ogDupOzaqT4XuqOc-Qk",
+  "authDomain": "christian-project-3cf5c.firebaseapp.com",
+  "storageBucket": "christian-project-3cf5c.firebasestorage.app",
+  "messagingSenderId": "701163493751",
+  "measurementId": "G-7K9YKDSNQB",
+  "databaseURL": "https://christian-project-3cf5c-default-rtdb.asia-southeast1.firebasedatabase.app",
   "oAuthClientId": "293805604015-gk2q6ip3k6ka7ul5s0dh0c7bkplsclu4.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -5,14 +5,14 @@ import { getAuth } from "firebase/auth";
 import appletConfig from "../firebase-applet-config.json";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || appletConfig.apiKey || "AIzaSyD_LsdvEVnPwy9ApljoqGkAx2qFXc2VXiU",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain || "cskprojectreport.firebaseapp.com",
-  databaseURL: (import.meta.env as any).VITE_FIREBASE_DATABASE_URL || (appletConfig as any).databaseURL || "https://cskprojectreport-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId || "cskprojectreport",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket || "cskprojectreport.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId || "772239435792",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || appletConfig.appId || "1:772239435792:web:6283d60fb8a0702e918295",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || (appletConfig as any).measurementId || "G-XS5GGQ7ER7"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || appletConfig.apiKey || "AIzaSyDRb6zMxT9YvBs0ogDupOzaqT4XuqOc-Qk",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain || "christian-project-3cf5c.firebaseapp.com",
+  databaseURL: (import.meta.env as any).VITE_FIREBASE_DATABASE_URL || (appletConfig as any).databaseURL || "https://christian-project-3cf5c-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId || "christian-project-3cf5c",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket || "christian-project-3cf5c.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId || "701163493751",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || appletConfig.appId || "1:701163493751:web:83e345b694049db5fde972",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || (appletConfig as any).measurementId || "G-7K9YKDSNQB"
 };
 
 const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || (appletConfig as any).firestoreDatabaseId;
