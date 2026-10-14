@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix CSKprojectReport",
+  "description": "A comprehensive restaurant performance management dashboard with 3D UI, staff tracking, financial reporting, live chat, and real-time online presence monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

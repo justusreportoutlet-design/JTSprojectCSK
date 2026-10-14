@@ -1,0 +1,290 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  /* Legacy Color Overrides to prevent oklch/oklab parsing errors in html2canvas/html2pdf */
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-indigo-50: #eef2ff;
+  --color-indigo-100: #e0e7ff;
+  --color-indigo-200: #c7d2fe;
+  --color-indigo-300: #a5b4fc;
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
+  --color-pink-400: #f472b6;
+  --color-pink-500: #ec4899;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-orange-600: #ea580c;
+  --color-yellow-400: #fbbf24;
+  --color-yellow-500: #f59e0b;
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --color-teal-600: #0d9488;
+  --color-cyan-400: #22d3ee;
+  --color-cyan-500: #06b6d4;
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-fuchsia-400: #e879f9;
+  --color-fuchsia-500: #d946ef;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-emerald-800: #065f46;
+  --color-blue-800: #1e40af;
+  --color-indigo-800: #3730a3;
+  --color-amber-600: #d97706;
+  --color-rose-700: #be123c;
+  --color-pink-600: #db2777;
+  --color-yellow-600: #d97706;
+  --color-teal-700: #0f766e;
+  --color-teal-800: #115e59;
+  --color-cyan-600: #0891b2;
+  --color-purple-500: #a855f7;
+  --color-purple-600: #9333ea;
+  --color-purple-700: #7e22ce;
+  --color-purple-800: #6b21a8;
+  --color-red-700: #b91c1c;
+}
+
+:root {
+  --primary: #8b5cf6;
+  --bg-dark: #0f172a;
+}
+
+html {
+  touch-action: pan-x pan-y pinch-zoom;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  min-height: 100vh;
+  color: #e94560;
+  margin: 0;
+  padding: 0;
+  touch-action: pan-x pan-y pinch-zoom;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.glass-card {
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 1rem;
+  backdrop-filter: none !important;
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Container untuk elemen yang bisa digeser horizontal (slide) */
+.slide-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.slide-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Memastikan tabel besar bisa di-slide di layar kecil */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+}
+
+.no-blur {
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+/* Custom scrollbar yang ramah sentuhan */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.4);
+  border-radius: 10px;
+}
+
+/* Touch-friendly horizontal scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Ensure all inputs are easily clickable on mobile */
+input, select, button {
+  min-height: 44px;
+}
+
+/* Table wrapper for horizontal scroll */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+  border-radius: 1rem;
+}
+
+@media print {
+  aside, header, button, .no-print {
+    display: none !important;
+  }
+  body {
+    background: #0f172a !important;
+    color: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+/* Light Mode Overrides */
+body.light-mode {
+  /* Slate colors for backgrounds and borders */
+  --color-slate-950: #f8fafc;
+  --color-slate-900: #f1f5f9;
+  --color-slate-800: #e2e8f0;
+  --color-slate-700: #e2e8f0;
+  
+  /* Slate mid tones */
+  --color-slate-600: #94a3b8;
+  
+  /* Slate colors for text */
+  --color-slate-500: #475569;
+  --color-slate-400: #334155;
+  --color-slate-300: #1e293b;
+  --color-slate-200: #0f172a;
+  --color-slate-100: #020617;
+  --color-slate-50:  #020617;
+
+  /* Neutral Gray used for some stuff */
+  --color-gray-900: #f3f4f6;
+  --color-gray-800: #f9fafb;
+  --color-gray-700: #e5e7eb;
+  --color-gray-600: #d1d5db;
+  --color-gray-500: #4b5563;
+  --color-gray-400: #374151;
+  --color-gray-300: #1f2937;
+  --color-gray-200: #111827;
+  --color-gray-100: #030712;
+  --color-gray-50:  #030712;
+
+  /* White and black */
+  --color-white: #0f172a;
+
+  /* Specific explicit overrides for bg-[#0f172a] */
+  --bg-dark: #f8fafc;
+
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
+  color: #1e293b;
+}
+
+/* Restore true white for solid colored backgrounds so text-white and border-white work properly inside buttons */
+body.light-mode [class*="bg-blue-"]:not([class*="bg-blue-50/"]):not([class*="bg-blue-100/"]):not([class*="bg-blue-900/10"]),
+body.light-mode [class*="bg-emerald-"]:not([class*="bg-emerald-50/"]):not([class*="bg-emerald-100/"]),
+body.light-mode [class*="bg-indigo-"]:not([class*="bg-indigo-50/"]):not([class*="bg-indigo-100/"]),
+body.light-mode [class*="bg-red-"]:not([class*="bg-red-50/"]):not([class*="bg-red-100/"]),
+body.light-mode [class*="bg-amber-"]:not([class*="bg-amber-50/"]):not([class*="bg-amber-100/"]),
+body.light-mode [class*="bg-yellow-"]:not([class*="bg-yellow-50/"]):not([class*="bg-yellow-100/"]),
+body.light-mode [class*="bg-purple-"]:not([class*="bg-purple-50/"]):not([class*="bg-purple-100/"]):not([class*="bg-purple-900/10"]),
+body.light-mode [class*="bg-rose-"]:not([class*="bg-rose-50/"]):not([class*="bg-rose-100/"]),
+body.light-mode [class*="bg-pink-"]:not([class*="bg-pink-50/"]):not([class*="bg-pink-100/"]):not([class*="bg-pink-900/10"]),
+body.light-mode [class*="bg-cyan-"]:not([class*="bg-cyan-50/"]):not([class*="bg-cyan-100/"]) {
+  --color-white: #ffffff;
+}
+
+body.light-mode [class*="bg-amber-"],
+body.light-mode [class*="bg-yellow-"],
+body.light-mode [class*="bg-cyan-"] {
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+}
+
+body.light-mode .glass-card {
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* Animasi fade in yang smooth */
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}

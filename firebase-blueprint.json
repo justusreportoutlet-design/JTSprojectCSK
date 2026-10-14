@@ -1,0 +1,209 @@
+{
+  "entities": {
+    "DashboardData": {
+      "title": "DashboardData",
+      "description": "Stores the entire dashboard state for a user, keyed by month.",
+      "type": "object",
+      "properties": {
+        "monthlyData": {
+          "type": "object",
+          "description": "A map of month IDs to AppState objects."
+        },
+        "updatedAt": {
+          "type": "object",
+          "description": "Firestore server timestamp."
+        },
+        "lastUpdatedBy": { "type": "string" },
+        "staffList": { "type": "array" },
+        "leaveRecords": { "type": "array" },
+        "manpowerData": { "type": "object" },
+        "dailyOvertime": { "type": "object" },
+        "weeklyOvertime": { "type": "object" },
+        "dailyAttendance": { "type": "object" },
+        "dailyExternalAudit": { "type": "object" },
+        "dailyCPA": { "type": "object" },
+        "dailyGSI": { "type": "object" },
+        "guestComplaints": { "type": "array" },
+        "affiliateHistory": { "type": "array" },
+        "googleReview": { "type": "object" },
+        "promoSettings": { "type": "object" },
+        "bankingPromos": { "type": "array" },
+        "dailyStrategy": { "type": "object" },
+        "sales": { "type": "object" },
+        "dailyTargets": { "type": "object" },
+        "expenses": { "type": "object" },
+        "monthlyCogsData": { "type": "object" },
+        "dailyMainKitchenLedger": { "type": "object" },
+        "dailyMainStoreLedger": { "type": "object" },
+        "dailyChemicalLedger": { "type": "object" },
+        "dailyCashLedger": { "type": "object" },
+        "dailyCommodityLedger": { "type": "object" },
+        "dailyGuestSuppliesLedger": { "type": "object" },
+        "dailyCityLedger": { "type": "object" },
+        "dailyTgifLedger": { "type": "object" },
+        "dailySukandaLedger": { "type": "object" },
+        "dailyEverestLedger": { "type": "object" },
+        "dailyPanfilaLedger": { "type": "object" },
+        "dailyIkigaiLedger": { "type": "object" },
+        "dailyKebunkuLedger": { "type": "object" },
+        "dailySaungKubilLedger": { "type": "object" },
+        "dailyGasLedger": { "type": "object" },
+        "dailyThirdPartyLedger": { "type": "object" },
+        "energyCost": { "type": "object" },
+        "dailyBreakTime": { "type": "object" },
+        "dailyGoogleReview": { "type": "object" },
+        "logisticItems": { "type": "array" },
+        "dailyLogisticRecords": { "type": "object" },
+        "peminjamanRecords": { "type": "array" },
+        "logisticBeginningStocks": { "type": "object" },
+        "logisticPeriodPrices": { "type": "object" },
+        "dailyQA": { "type": "object" },
+        "dailyRecording": { "type": "object" },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["updatedAt", "lastUpdatedBy"]
+    },
+    "GlobalSystemData": {
+      "title": "GlobalSystemData",
+      "description": "Staff list and system-wide configurations.",
+      "type": "object",
+      "properties": {
+        "staffList": { "type": "array" },
+        "leaveRecords": { "type": "array" },
+        "dailyOvertime": { "type": "object" },
+        "weeklyOvertime": { "type": "object" },
+        "dailyAttendance": { "type": "object" },
+        "dailyExternalAudit": { "type": "object" },
+        "dailyCPA": { "type": "object" },
+        "dailyGSI": { "type": "object" },
+        "affiliateHistory": { "type": "array" },
+        "logisticAssets": { "type": "array" },
+        "dailyLogisticStock": { "type": "object" },
+        "guestComplaints": { "type": "array" },
+        "manpowerData": { "type": "object" },
+        "updatedAt": { "type": "object" },
+        "lastUpdatedBy": { "type": "string" }
+      },
+      "required": ["updatedAt", "lastUpdatedBy"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Stores a single notification about a data update.",
+      "type": "object",
+      "properties": {
+        "user": { "type": "string" },
+        "outlet": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "object" }
+      },
+      "required": ["user", "outlet", "message", "timestamp"]
+    },
+    "Presence": {
+      "title": "Presence",
+      "description": "User online presence status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "outlet": { "type": "string" },
+        "timestamp": { "type": "object" }
+      },
+      "required": ["uid", "email", "lastSeen", "timestamp"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A live chat message.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "senderName": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "serverTime": { "type": "object" },
+        "outlet": { "type": "string" }
+      },
+      "required": ["text", "senderEmail", "timestamp", "serverTime"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "System-wide and promo configuration settings.",
+      "type": "object",
+      "properties": {
+        "maxDailyInputs": { "type": "number" },
+        "onlineTimeLimit": { "type": "number" },
+        "maxOnlineUsers": { "type": "number" },
+        "updatedAt": { "type": "object" },
+        "lastUpdatedBy": { "type": "string" }
+      }
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Administrator credentials record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Connectivity test document.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" }
+      }
+    },
+    "Laporan": {
+      "title": "Laporan",
+      "description": "CSK Project daily progress report document.",
+      "type": "object",
+      "properties": {
+        "lokasi": { "type": "string" },
+        "pekerjaan": { "type": "string" },
+        "progres": { "type": "string" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["lokasi", "pekerjaan", "progres"]
+    }
+  },
+  "firestore": {
+    "/laporan/{docId}": {
+      "schema": "Laporan",
+      "description": "Daily project reports with irit pagination."
+    },
+    "/system_data/global_data": {
+      "schema": "GlobalSystemData",
+      "description": "Global system settings, staff list, and shared data."
+    },
+    "/system_config/{docId}": {
+      "schema": "SystemConfig",
+      "description": "System and promo configuration settings."
+    },
+    "/dashboards/{outletId}": {
+      "schema": "DashboardData",
+      "description": "Dashboard data for a specific outlet."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Global notifications for data updates across all outlets."
+    },
+    "/presence/{userId}": {
+      "schema": "Presence",
+      "description": "Online status tracking per user."
+    },
+    "/chat_messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Global chat messages."
+    },
+    "/admins/{userId}": {
+      "schema": "AdminRecord",
+      "description": "Admin users list."
+    },
+    "/test/connection": {
+      "schema": "TestConnection",
+      "description": "Test connection document."
+    }
+  }
+}
