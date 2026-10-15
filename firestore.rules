@@ -1,9 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // --- HELPERS ---
+    // --- 0. GLOBAL SAFETY NET ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- 1. GLOBAL HELPERS ---
     function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    
+    // Admin check: Only if the user's UID exists in the /admins/ collection or email matches bootstrapped admin
     function isAdmin() { 
       return isSignedIn() && (
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
@@ -16,27 +23,141 @@ service cloud.firestore {
         ))
       ); 
     }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
     function isValidId(id) { 
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_ ()&.,/\'-]+$');
     }
 
-    // --- PROJECT BARU christian-project-3cf5c - VERSI IRIT ---
-    
-    match /laporan/{docId} {
-      allow get, list: if true; // biar getDataIrit() bisa jalan, cuma 20 reads
-      allow create, update: if isValidId(docId);
-      allow delete: if isAdmin();
+    // --- 2. ENTITY VALIDATION HELPERS ---
+
+    function isEmailMatching(dataEmail) {
+      return isAdmin() ||
+             (request.auth != null && request.auth.token.email != null && dataEmail is string && dataEmail.lower() == request.auth.token.email.lower()) || 
+             (dataEmail is string && dataEmail.size() <= 128);
     }
 
-    match /dashboards/{outletId} {
-      allow get, list: if true;
-      allow create, update: if isValidId(outletId);
-      allow delete: if isAdmin();
+    function isValidDashboardData(data) {
+      return (data.updatedAt == request.time || data.updatedAt is timestamp)
+             && (isAdmin() || isEmailMatching(data.lastUpdatedBy))
+             && data.lastUpdatedBy is string && data.lastUpdatedBy.size() <= 128
+             && (data.monthlyData is map || !data.keys().hasAny(['monthlyData']))
+             && (data.staffList is list || !data.keys().hasAny(['staffList']))
+             && (data.leaveRecords is list || !data.keys().hasAny(['leaveRecords']))
+             && (data.manpowerData is map || !data.keys().hasAny(['manpowerData']))
+             && (data.dailyOvertime is map || !data.keys().hasAny(['dailyOvertime']))
+             && (data.weeklyOvertime is map || !data.keys().hasAny(['weeklyOvertime']))
+             && (data.dailyAttendance is map || !data.keys().hasAny(['dailyAttendance']))
+             && (data.dailyExternalAudit is map || !data.keys().hasAny(['dailyExternalAudit']))
+             && (data.dailyCPA is map || !data.keys().hasAny(['dailyCPA']))
+             && (data.dailyGSI is map || !data.keys().hasAny(['dailyGSI']))
+             && (data.guestComplaints is list || !data.keys().hasAny(['guestComplaints']))
+             && (data.affiliateHistory is list || !data.keys().hasAny(['affiliateHistory']))
+             && (data.googleReview is map || !data.keys().hasAny(['googleReview']))
+             && (data.promoSettings is map || !data.keys().hasAny(['promoSettings'])) && (data.bankingPromos is list || !data.keys().hasAny(['bankingPromos'])) && (data.dailyStrategy is map || !data.keys().hasAny(['dailyStrategy']))
+             && (data.sales is map || !data.keys().hasAny(['sales']))
+             && (data.dailyTargets is map || !data.keys().hasAny(['dailyTargets']))
+             && (data.expenses is map || !data.keys().hasAny(['expenses']))
+             && (data.monthlyCogsData is map || !data.keys().hasAny(['monthlyCogsData']))
+             && (data.dailyMainKitchenLedger is map || !data.keys().hasAny(['dailyMainKitchenLedger']))
+             && (data.dailyMainStoreLedger is map || !data.keys().hasAny(['dailyMainStoreLedger']))
+             && (data.dailyChemicalLedger is map || !data.keys().hasAny(['dailyChemicalLedger']))
+             && (data.dailyCashLedger is map || !data.keys().hasAny(['dailyCashLedger']))
+             && (data.dailyCommodityLedger is map || !data.keys().hasAny(['dailyCommodityLedger']))
+             && (data.dailyGuestSuppliesLedger is map || !data.keys().hasAny(['dailyGuestSuppliesLedger']))
+             && (data.dailyCityLedger is map || !data.keys().hasAny(['dailyCityLedger']))
+             && (data.dailyTgifLedger is map || !data.keys().hasAny(['dailyTgifLedger']))
+             && (data.dailySukandaLedger is map || !data.keys().hasAny(['dailySukandaLedger']))
+             && (data.dailyEverestLedger is map || !data.keys().hasAny(['dailyEverestLedger']))
+             && (data.dailyPanfilaLedger is map || !data.keys().hasAny(['dailyPanfilaLedger']))
+             && (data.dailyIkigaiLedger is map || !data.keys().hasAny(['dailyIkigaiLedger']))
+             && (data.dailyKebunkuLedger is map || !data.keys().hasAny(['dailyKebunkuLedger']))
+             && (data.dailySaungKubilLedger is map || !data.keys().hasAny(['dailySaungKubilLedger']))
+             && (data.dailyGasLedger is map || !data.keys().hasAny(['dailyGasLedger']))
+             && (data.dailyThirdPartyLedger is map || !data.keys().hasAny(['dailyThirdPartyLedger']))
+             && (data.energyCost is map || !data.keys().hasAny(['energyCost']))
+             && (data.dailyBreakTime is map || !data.keys().hasAny(['dailyBreakTime']))
+             && (data.dailyGoogleReview is map || !data.keys().hasAny(['dailyGoogleReview']))
+             && (data.logisticItems is list || !data.keys().hasAny(['logisticItems']))
+             && (data.dailyLogisticRecords is map || !data.keys().hasAny(['dailyLogisticRecords']))
+             && (data.peminjamanRecords is list || !data.keys().hasAny(['peminjamanRecords']))
+             && (data.logisticBeginningStocks is map || !data.keys().hasAny(['logisticBeginningStocks']))
+             && (data.logisticPeriodPrices is map || !data.keys().hasAny(['logisticPeriodPrices']))
+             && (data.dailyQA is map || !data.keys().hasAny(['dailyQA']))
+             && (data.dailyRecording is map || !data.keys().hasAny(['dailyRecording']))
+             && (data.isDeleted is bool || !data.keys().hasAny(['isDeleted']))
+             && data.keys().hasAll(['updatedAt', 'lastUpdatedBy']);
+    }
+
+    function isValidSystemData(data) {
+      return (data.updatedAt == request.time || data.updatedAt is timestamp)
+             && (isAdmin() || isEmailMatching(data.lastUpdatedBy))
+             && (data.staffList is list || !data.keys().hasAny(['staffList']))
+             && (data.leaveRecords is list || !data.keys().hasAny(['leaveRecords']))
+             && (data.dailyOvertime is map || !data.keys().hasAny(['dailyOvertime']))
+             && (data.weeklyOvertime is map || !data.keys().hasAny(['weeklyOvertime']))
+             && (data.dailyAttendance is map || !data.keys().hasAny(['dailyAttendance']))
+             && (data.dailyExternalAudit is map || !data.keys().hasAny(['dailyExternalAudit']))
+             && (data.dailyCPA is map || !data.keys().hasAny(['dailyCPA']))
+             && (data.dailyGSI is map || !data.keys().hasAny(['dailyGSI']))
+             && (data.affiliateHistory is list || !data.keys().hasAny(['affiliateHistory']))
+             && (data.logisticAssets is list || !data.keys().hasAny(['logisticAssets']))
+             && (data.dailyLogisticStock is map || !data.keys().hasAny(['dailyLogisticStock']))
+             && (data.guestComplaints is list || !data.keys().hasAny(['guestComplaints']))
+             && (data.manpowerData is map || !data.keys().hasAny(['manpowerData']))
+             && data.keys().hasAll(['updatedAt', 'lastUpdatedBy']);
+    }
+
+    function isValidNotification(data) {
+      return data.user is string && data.user.size() <= 128
+             && data.outlet is string && data.outlet.size() <= 128
+             && data.message is string && data.message.size() <= 2048
+             && (data.timestamp == request.time || data.timestamp is timestamp || data.timestamp is string)
+             && data.keys().hasAll(['user', 'outlet', 'message', 'timestamp']);
+    }
+
+    function isValidPresence(data) {
+      return isEmailMatching(data.email)
+             && data.uid == request.auth.uid // Identity integrity
+             && data.lastSeen is string && data.lastSeen.size() <= 128
+             && (data.timestamp == request.time || data.timestamp is timestamp)
+             && (data.outlet is string && data.outlet.size() <= 128 || !data.keys().hasAny(['outlet']))
+             && data.keys().hasAll(['email', 'uid', 'lastSeen', 'timestamp']);
+    }
+
+    function isValidChatMessage(data) {
+      return data.text is string && data.text.size() <= 1024
+             && data.senderEmail is string && data.senderEmail.size() <= 128
+             && data.senderName is string && data.senderName.size() <= 128
+             && data.timestamp is string && data.timestamp.size() <= 128
+             && (data.serverTime == request.time || data.serverTime is timestamp)
+             && (data.outlet is string && data.outlet.size() <= 128 || !data.keys().hasAny(['outlet']))
+             && data.keys().hasAll(['text', 'senderEmail', 'senderName', 'timestamp', 'serverTime']);
+    }
+
+
+    // --- 3. COLLECTION RULES ---
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isAdmin();
+      allow write: if false; // Admins managed via console or custom script
     }
 
     match /system_data/{docId} {
       allow get, list: if true;
-      allow create, update: if isValidId(docId);
+      allow create, update: if isValidId(docId) && (
+        isAdmin() || (
+          docId == 'system_config' ? (
+            (incoming().updatedAt == request.time || incoming().updatedAt is timestamp) &&
+            (incoming().lastUpdatedBy is string || !incoming().keys().hasAny(['lastUpdatedBy'])) &&
+            (incoming().maxDailyInputs is number || !incoming().keys().hasAny(['maxDailyInputs'])) &&
+            (incoming().onlineTimeLimit is number || !incoming().keys().hasAny(['onlineTimeLimit'])) &&
+            (incoming().maxOnlineUsers is number || !incoming().keys().hasAny(['maxOnlineUsers']))
+          ) : isValidSystemData(incoming())
+        )
+      );
       allow delete: if isAdmin();
     }
 
@@ -46,29 +167,50 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /dashboards/{outletId} {
+      allow get, list: if true; // Public view for dashboards & regional reports
+      
+      allow create, update: if isValidId(outletId) && (
+        isAdmin() || (
+          incoming().keys().hasOnly(['promoSettings']) ||
+          (resource != null && incoming().diff(existing()).affectedKeys().hasOnly(['promoSettings']))
+        ) || (
+          incoming().keys().hasOnly(['isDeleted', 'updatedAt']) ||
+          (resource != null && incoming().diff(existing()).affectedKeys().hasOnly(['isDeleted', 'updatedAt']))
+        ) || (
+          isValidDashboardData(incoming())
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
     match /notifications/{notificationId} {
       allow get, list: if true;
-      allow create: if isValidId(notificationId);
+      allow create: if isValidId(notificationId) && (isAdmin() || isValidNotification(incoming()));
       allow update, delete: if isAdmin();
     }
 
     match /presence/{userId} {
-      allow get, list: if true;
-      allow create, update: if userId == request.auth.uid || isAdmin() || true;
-      allow delete: if true;
+      allow get, list: if true; 
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(userId) && (isAdmin() || isValidPresence(incoming()));
+      allow delete: if isSignedIn() && (userId == request.auth.uid || isAdmin());
     }
 
     match /chat_messages/{messageId} {
       allow get, list: if true;
-      allow create: if isValidId(messageId);
-      allow update, delete: if isAdmin();
+      allow create: if isValidId(messageId) && (isAdmin() || isValidChatMessage(incoming()));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
-    match /admins/{userId} {
-      allow get: if isSignedIn() && isValidId(userId);
-      allow list: if isAdmin();
-      allow write: if false;
+    match /laporan/{docId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(docId);
+      allow delete: if isAdmin();
     }
 
     match /test/connection {
       allow get: if true;
+    }
+  }
+}
