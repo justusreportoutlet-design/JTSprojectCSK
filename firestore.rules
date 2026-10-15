@@ -203,14 +203,20 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /laporan/{docId} {
+       match /laporan/{docId} {
       allow get, list: if true;
       allow create, update: if isValidId(docId);
       allow delete: if isAdmin();
     }
 
-    match /test/connection {
-      allow get: if true;
+    match /test/{docId} {
+      allow get, list: if true; // FIX: tadinya cuma get, sekarang get+list biar ga Missing permissions
+      allow create, update: if true;
+    }
+
+    match /connection/{docId} {
+      allow get, list: if true;
+      allow create, update: if true;
     }
   }
 }
