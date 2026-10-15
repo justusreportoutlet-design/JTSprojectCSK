@@ -1,12 +1,11 @@
-// firebase.ts - VERSI IRIT christian-project-3cf5c
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getFirestore, 
   initializeFirestore, 
   persistentLocalCache, 
-  persistentMultipleTabManager,
+  persistentMultipleTabManager, 
   CACHE_SIZE_UNLIMITED,
-  memoryLocalCache
+  memoryLocalCache 
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
@@ -15,20 +14,21 @@ const firebaseConfig = {
   authDomain: "christian-project-3cf5c.firebaseapp.com",
   projectId: "christian-project-3cf5c",
   storageBucket: "christian-project-3cf5c.firebasestorage.app",
-  messagingSenderId: "997954373115",
-  appId: "1:997954373115:web:7a6d5a6f7e8d9c0b1a2e3f"
+  messagingSenderId: "701163493761",
+  appId: "1:701163493761:web:83e345b69404d9bf87de972",
+  measurementId: "G-7K9YKDSMQB"
 };
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// VERSI IRIT 1000 BROWSER - pakai persistent cache IndexedDB multi-tab
-let firestoreDb;
+// VERSI IRIT 1000 BROWSER - ANTI LELET
+let firestoreDb: any;
 try {
   firestoreDb = initializeFirestore(app, {
     localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-      cacheSizeBytes: CACHE_SIZE_UNLIMITED
-    })
+      tabManager: persistentMultipleTabManager()
+    }),
+    cacheSizeBytes: CACHE_SIZE_UNLIMITED
   });
 } catch {
   try {
@@ -43,4 +43,3 @@ try {
 export const db = firestoreDb;
 export const auth = getAuth(app);
 export { app };
-export default app;
