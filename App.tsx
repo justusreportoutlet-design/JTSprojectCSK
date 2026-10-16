@@ -6,7 +6,7 @@ import { safeStorage, safeClipboard, safeWindow } from './lib/safeStorage';
 import { toLocalDateStr } from './lib/dateUtils';
 import { calculateLeaveEntitlement } from './lib/staffUtils';
 import { auth, db } from './firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import Header from './components/Header';
@@ -251,7 +251,7 @@ const App: React.FC = () => {
     if (!auth.currentUser) return;
 
     const configRef = doc(db, 'system_data', 'system_config');
-    const unsubscribe = onSnapshot(configRef, (snapshot) => {
+    getDoc(configRef).then((snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.maxDailyInputs !== undefined) {
@@ -259,11 +259,9 @@ const App: React.FC = () => {
           localStorage.setItem('MAX_DAILY_INPUT_LIMIT', data.maxDailyInputs.toString());
         }
       }
-    }, (error) => {
-      console.warn("[App] Could not listen to system config:", error);
+    }).catch((error) => {
+      console.warn("[App] Could not fetch system config:", error);
     });
-
-    return unsubscribe;
   }, [user.isLoggedIn, user.email]);
 
   const [filters, setFilters] = useState(() => {

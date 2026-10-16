@@ -13,7 +13,7 @@ import {
   getStoredStrategyCatalog,
   saveStoredStrategyCatalog
 } from '../constants';
-import { doc, getDoc, setDoc, onSnapshot, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
 interface Props {
@@ -121,62 +121,63 @@ export const OutletControlModal: React.FC<Props> = ({
   const [stratIsActiveInput, setStratIsActiveInput] = useState(true);
   const [strategyToDelete, setStrategyToDelete] = useState<StrategyMenuItem | null>(null);
 
-  // Load and Listen to Firestore configurations
+  // Load Firestore configurations once when modal opens
   useEffect(() => {
-    // 1. Listen to outlet_control
-    const outletDocRef = doc(db, 'system_config', 'outlet_control');
-    const unsubOutlets = onSnapshot(outletDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (Array.isArray(data.outlets) && data.outlets.length > 0) {
-          setOutletConfigs(data.outlets);
-          saveActiveOutletConfigs(data.outlets);
-          onOutletsChange?.(data.outlets);
-        }
-      }
-    }, (err) => {
-      console.warn('[OutletControl] Listener notice for outlet_control:', err);
-    });
-
-    // 2. Listen to promo_settings
-    const promoDocRef = doc(db, 'system_config', 'promo_settings');
-    const unsubPromo = onSnapshot(promoDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setPromoSettings(data as PromoSettings);
-        if (Array.isArray(data.customBankPromos) && data.customBankPromos.length > 0) {
-          setBankPromosList(data.customBankPromos);
-        }
-        try {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(data));
-            window.dispatchEvent(new CustomEvent('appPromoSettingsChanged', { detail: data }));
+    const fetchData = async () => {
+      try {
+        // 1. Fetch outlet_control
+        const outletDocRef = doc(db, 'system_config', 'outlet_control');
+        const outletSnap = await getDoc(outletDocRef);
+        if (outletSnap.exists()) {
+          const data = outletSnap.data();
+          if (Array.isArray(data.outlets) && data.outlets.length > 0) {
+            setOutletConfigs(data.outlets);
+            saveActiveOutletConfigs(data.outlets);
+            onOutletsChange?.(data.outlets);
           }
-        } catch (e) {}
-      }
-    }, (err) => {
-      console.warn('[OutletControl] Listener notice for promo_settings:', err);
-    });
-
-    // 3. Listen to strategy_catalog
-    const stratDocRef = doc(db, 'system_config', 'strategy_catalog');
-    const unsubStrat = onSnapshot(stratDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (Array.isArray(data.items) && data.items.length > 0) {
-          setStrategyCatalog(data.items);
-          saveStoredStrategyCatalog(data.items);
         }
+      } catch (err) {
+        console.warn('[OutletControl] Notice for outlet_control:', err);
       }
-    }, (err) => {
-      console.warn('[OutletControl] Listener notice for strategy_catalog:', err);
-    });
 
-    return () => {
-      unsubOutlets();
-      unsubPromo();
-      unsubStrat();
+      try {
+        // 2. Fetch promo_settings
+        const promoDocRef = doc(db, 'system_config', 'promo_settings');
+        const promoSnap = await getDoc(promoDocRef);
+        if (promoSnap.exists()) {
+          const data = promoSnap.data();
+          setPromoSettings(data as PromoSettings);
+          if (Array.isArray(data.customBankPromos) && data.customBankPromos.length > 0) {
+            setBankPromosList(data.customBankPromos);
+          }
+          try {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(data));
+              window.dispatchEvent(new CustomEvent('appPromoSettingsChanged', { detail: data }));
+            }
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.warn('[OutletControl] Notice for promo_settings:', err);
+      }
+
+      try {
+        // 3. Fetch strategy_catalog
+        const stratDocRef = doc(db, 'system_config', 'strategy_catalog');
+        const stratSnap = await getDoc(stratDocRef);
+        if (stratSnap.exists()) {
+          const data = stratSnap.data();
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            setStrategyCatalog(data.items);
+            saveStoredStrategyCatalog(data.items);
+          }
+        }
+      } catch (err) {
+        console.warn('[OutletControl] Notice for strategy_catalog:', err);
+      }
     };
+
+    fetchData();
   }, []);
 
   // Filtered outlets

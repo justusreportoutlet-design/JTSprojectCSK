@@ -26,9 +26,9 @@ let firestoreDb: any;
 try {
   firestoreDb = initializeFirestore(app, {
     localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    }),
-    cacheSizeBytes: CACHE_SIZE_UNLIMITED
+      tabManager: persistentMultipleTabManager(),
+      cacheSizeBytes: CACHE_SIZE_UNLIMITED
+    })
   });
 } catch {
   try {

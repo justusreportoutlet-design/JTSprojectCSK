@@ -3,7 +3,7 @@ import { AppState, Outlet, BankingPromoItem } from '../types';
 import { OUTLETS, MONTHS, getStoredBankPromos, getActiveOutletNames } from '../constants';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 interface Props {
@@ -47,22 +47,26 @@ export const RegionalPromoRecapTable: React.FC<Props> = ({
     const handlePromoChange = () => setPromoConfigVersion(v => v + 1);
     window.addEventListener('appPromoSettingsChanged', handlePromoChange);
 
-    const promoDocRef = doc(db, 'system_config', 'promo_settings');
-    const unsubPromo = onSnapshot(promoDocRef, (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        try {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(d));
-          }
-        } catch (e) {}
-        setPromoConfigVersion(v => v + 1);
-      }
-    }, () => {});
+    const fetchPromo = async () => {
+      try {
+        const promoDocRef = doc(db, 'system_config', 'promo_settings');
+        const snap = await getDoc(promoDocRef);
+        if (snap.exists()) {
+          const d = snap.data();
+          try {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(d));
+            }
+          } catch (e) {}
+          setPromoConfigVersion(v => v + 1);
+        }
+      } catch (e) {}
+    };
+
+    fetchPromo();
 
     return () => {
       window.removeEventListener('appPromoSettingsChanged', handlePromoChange);
-      unsubPromo();
     };
   }, []);
 

@@ -872,59 +872,47 @@ export function startRealtimeListener(
   onStatusChange?: (status: 'connected' | 'disconnected' | 'reconnecting') => void
 ) {
   let isSubscribed = true;
-  let lastKnownHash = '';
 
-  const syncFromServer = async () => {
+  // Hanya mengambil data 1 kali saat halaman dibuka atau outletId berubah agar tidak menimpa ketikan
+  const fetchData = async () => {
     if (!isSubscribed) return;
     try {
       const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}`);
       if (res.ok) {
         const json = await res.json();
-        if (json.outlet) {
+        if (json.outlet && isSubscribed) {
           const filled = unpackOutletDocument(json.outlet);
-          const newHash = JSON.stringify(filled);
-          if (newHash !== lastKnownHash) {
-            lastKnownHash = newHash;
-            onUpdate(filled);
-            onStatusChange?.('connected');
-          }
+          onUpdate(filled);
+          onStatusChange?.('connected');
+          return;
         }
       }
     } catch (e) {}
-  };
 
-  syncFromServer();
-  const pollInterval = setInterval(syncFromServer, 3000);
-
-  let unsubFirestore: (() => void) | null = null;
-  if (checkQuota() && auth.currentUser) {
-    try {
-      const outletRef = doc(db, COLLECTION_NAME, outletId);
-      unsubFirestore = onSnapshot(outletRef, (snap) => {
-        if (snap.exists()) {
+    // Fallback: ambil 1 kali dari Firestore via getDoc
+    if (checkQuota() && auth.currentUser) {
+      try {
+        const outletRef = doc(db, COLLECTION_NAME, outletId);
+        const snap = await getDoc(outletRef);
+        if (snap.exists() && isSubscribed) {
           const docData = snap.data();
           if (docData) {
             const filledMonthlyData = unpackOutletDocument(docData);
-            const newHash = JSON.stringify(filledMonthlyData);
-            if (newHash !== lastKnownHash) {
-              lastKnownHash = newHash;
-              onUpdate(filledMonthlyData);
-            }
+            onUpdate(filledMonthlyData);
           }
         }
         onStatusChange?.('connected');
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LISTEN, `${COLLECTION_NAME}/${outletId}`);
-      });
-    } catch {}
-  }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `${COLLECTION_NAME}/${outletId}`);
+      }
+    }
+  };
 
+  fetchData();
   onStatusChange?.('connected');
 
   const cleanup = () => {
     isSubscribed = false;
-    clearInterval(pollInterval);
-    if (unsubFirestore) unsubFirestore();
   };
 
   activeListeners.push(cleanup);

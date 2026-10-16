@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AppState, StrategyMenuItem, DailyStrategyRecord, Staff, StaffStrategyTarget, StaffMenuItemTarget } from '../types';
 import { getStoredStrategyCatalog, getAreaForOutlet } from '../constants';
 import { resolveOutletManpowerData } from '../lib/manpowerUtils';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -273,24 +273,28 @@ export const StrategiMenuModule: React.FC<Props> = ({
     };
     window.addEventListener('appStrategyCatalogChanged', handleCatalogEvent);
 
-    const catRef = doc(db, 'system_config', 'strategy_catalog');
-    const unsub = onSnapshot(catRef, (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        if (Array.isArray(d.items) && d.items.length > 0) {
-          setCatalog(d.items);
-          try {
-            localStorage.setItem('APP_STRATEGY_CATALOG', JSON.stringify(d.items));
-          } catch (e) {}
+    const fetchCatalog = async () => {
+      try {
+        const catRef = doc(db, 'system_config', 'strategy_catalog');
+        const snap = await getDoc(catRef);
+        if (snap.exists()) {
+          const d = snap.data();
+          if (Array.isArray(d.items) && d.items.length > 0) {
+            setCatalog(d.items);
+            try {
+              localStorage.setItem('APP_STRATEGY_CATALOG', JSON.stringify(d.items));
+            } catch (e) {}
+          }
         }
+      } catch (err) {
+        console.warn('[StrategiMenuModule] Fetch notice:', err);
       }
-    }, (err) => {
-      console.warn('[StrategiMenuModule] Listener notice:', err);
-    });
+    };
+
+    fetchCatalog();
 
     return () => {
       window.removeEventListener('appStrategyCatalogChanged', handleCatalogEvent);
-      unsub();
     };
   }, []);
 

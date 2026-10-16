@@ -3,7 +3,7 @@ import { SalesData, DailySalesData, LedgerItem, BankingPromoItem } from "../type
 import ShareActions from "./ShareActions";
 
 import { motion, AnimatePresence } from "motion/react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 interface Props {
@@ -150,25 +150,29 @@ const SalesModule: React.FC<Props> = ({
     const handlePromoChange = () => setPromoConfigVersion(v => v + 1);
     window.addEventListener('appPromoSettingsChanged', handlePromoChange);
 
-    // Also listen directly to Firestore system_config/promo_settings for cross-client real-time update
-    const promoDocRef = doc(db, 'system_config', 'promo_settings');
-    const unsubPromo = onSnapshot(promoDocRef, (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        try {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(d));
-          }
-        } catch (e) {}
-        setPromoConfigVersion(v => v + 1);
+    // Ambil data 1 kali dari Firestore system_config/promo_settings saat halaman dibuka agar tidak menimpa ketikan
+    const fetchPromoSettings = async () => {
+      try {
+        const promoDocRef = doc(db, 'system_config', 'promo_settings');
+        const snap = await getDoc(promoDocRef);
+        if (snap.exists()) {
+          const d = snap.data();
+          try {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('APP_PROMO_SETTINGS', JSON.stringify(d));
+            }
+          } catch (e) {}
+          setPromoConfigVersion(v => v + 1);
+        }
+      } catch (err) {
+        console.warn('[SalesModule] Fetch notice for promo_settings:', err);
       }
-    }, (err) => {
-      console.warn('[SalesModule] Listener notice for promo_settings:', err);
-    });
+    };
+
+    fetchPromoSettings();
 
     return () => {
       window.removeEventListener('appPromoSettingsChanged', handlePromoChange);
-      unsubPromo();
     };
   }, []);
 

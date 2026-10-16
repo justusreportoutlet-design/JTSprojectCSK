@@ -5,7 +5,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 interface Props {
@@ -41,19 +41,23 @@ export const RegionalStrategiMenuRecapTable: React.FC<Props> = ({
     };
     window.addEventListener('appStrategyCatalogChanged', handleCatalogEvent);
 
-    const catRef = doc(db, 'system_config', 'strategy_catalog');
-    const unsub = onSnapshot(catRef, (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        if (Array.isArray(d.items) && d.items.length > 0) {
-          setCatalog(d.items);
+    const fetchCatalog = async () => {
+      try {
+        const catRef = doc(db, 'system_config', 'strategy_catalog');
+        const snap = await getDoc(catRef);
+        if (snap.exists()) {
+          const d = snap.data();
+          if (Array.isArray(d.items) && d.items.length > 0) {
+            setCatalog(d.items);
+          }
         }
-      }
-    }, () => {});
+      } catch (e) {}
+    };
+
+    fetchCatalog();
 
     return () => {
       window.removeEventListener('appStrategyCatalogChanged', handleCatalogEvent);
-      unsub();
     };
   }, []);
 
