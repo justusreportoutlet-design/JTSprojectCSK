@@ -216,7 +216,17 @@ export const CogsModule: React.FC<Props> = ({
   const [hasUserEditedClosingPercent, setHasUserEditedClosingPercent] = useState<boolean>(false);
 
   useEffect(() => {
-    if (savedCogsData.closingInventoryPercent !== undefined) {
+    if (savedCogsData.endingInventory !== undefined && Number(savedCogsData.endingInventory) > 0) {
+      if (savedCogsData.closingInventoryPercent !== undefined) {
+        setClosingInvPercent(savedCogsData.closingInventoryPercent);
+      } else {
+        const localPercent = localStorage.getItem(`COGS_CLOSING_INV_PERCENT_${monthKey}`);
+        if (localPercent !== null) {
+          const p = parseFloat(localPercent);
+          if (!isNaN(p)) setClosingInvPercent(p);
+        }
+      }
+    } else if (savedCogsData.closingInventoryPercent !== undefined) {
       setClosingInvPercent(savedCogsData.closingInventoryPercent);
     } else {
       const localPercent = localStorage.getItem(`COGS_CLOSING_INV_PERCENT_${monthKey}`);
@@ -225,7 +235,7 @@ export const CogsModule: React.FC<Props> = ({
         if (!isNaN(p)) setClosingInvPercent(p);
       }
     }
-  }, [monthKey, savedCogsData.closingInventoryPercent]);
+  }, [monthKey, savedCogsData.closingInventoryPercent, savedCogsData.endingInventory]);
 
   // 5. Max Closing Inventory % (Default Max 11%)
   const [maxClosingInvPercent, setMaxClosingInvPercent] = useState<number>(() => {
@@ -1078,10 +1088,13 @@ export const CogsModule: React.FC<Props> = ({
       });
     }
 
-    // Effective MTD Belanja: from Receiving Sheet Total Cost or manual override
+    // Receiving Sheet Total Belanja for the month (ambil dari total belanja fitur Receiving Sheet)
+    const fullMonthReceivingBelanja = days.reduce((sum, d) => sum + (d.purchases?.total || 0), 0);
+
+    // Effective MTD Belanja: ALWAYS taken from Total Belanja on Receiving Sheet (or manual override)
     const actualBelanjaMTD = useManualMtdBelanja && manualMtdBelanja !== ''
       ? (parseFloat(manualMtdBelanja) || 0)
-      : receivingSheetBelanjaMTD;
+      : (fullMonthReceivingBelanja > 0 ? fullMonthReceivingBelanja : receivingSheetBelanjaMTD);
 
     // 2. Average Sales Weekday & Weekend (Hasil MTD dari Rekapan Harian Revenue Daily Revenue)
     const autoAvgWeekday = pastWeekdayRecordedCount > 0
@@ -1233,9 +1246,27 @@ export const CogsModule: React.FC<Props> = ({
       : dailyPurchasingBudgetRemaining;
 
     // 8. Inventory & COGS Calculations:
-    // Formula COGS: Opening Inventory + Budget Belanja - Nominal Closing Inventory
-    const closingInventory = Math.round(totalProjectedRevenue * (closingInvPercent / 100));
-    const closingInventoryPercent = closingInvPercent;
+    // If Ending Inventory is set in Receiving Sheet, it directly controls and affects Closing Inventory:
+    const hasEndingInvFromReceiving = savedCogsData.endingInventory !== undefined && Number(savedCogsData.endingInventory) > 0;
+    const endingInventoryNominal = hasEndingInvFromReceiving ? Number(savedCogsData.endingInventory) : 0;
+
+    let closingInventory = 0;
+    let closingInventoryPercent = closingInvPercent;
+
+    if (hasEndingInvFromReceiving) {
+      closingInventory = endingInventoryNominal;
+      if (totalProjectedRevenue > 0) {
+        closingInventoryPercent = Number(((endingInventoryNominal / totalProjectedRevenue) * 100).toFixed(2));
+      } else if (actualRevenueMTD > 0) {
+        closingInventoryPercent = Number(((endingInventoryNominal / actualRevenueMTD) * 100).toFixed(2));
+      } else if (savedCogsData.closingInventoryPercent !== undefined) {
+        closingInventoryPercent = savedCogsData.closingInventoryPercent;
+      }
+    } else {
+      closingInventory = Math.round(totalProjectedRevenue * (closingInvPercent / 100));
+      closingInventoryPercent = closingInvPercent;
+    }
+
     const effectiveCOGS = Math.max(0, openingInventory + totalTargetBudgetBelanja - closingInventory);
     const actualCogsPercent = totalProjectedRevenue > 0 ? (effectiveCOGS / totalProjectedRevenue) * 100 : 0;
 
@@ -1384,7 +1415,9 @@ export const CogsModule: React.FC<Props> = ({
       budgetPerOrderDay,
       divisionList: calculatedDivisionsList,
       divisions,
-      daypartAnalytics
+      daypartAnalytics,
+      hasEndingInvFromReceiving,
+      endingInventoryNominal
     };
   }, [
     selectedMonth,
@@ -1403,7 +1436,8 @@ export const CogsModule: React.FC<Props> = ({
     barPercent,
     servicePercent,
     divisionAllocations,
-    divisionSupplierAllocations
+    divisionSupplierAllocations,
+    savedCogsData
   ]);
 
   // Derived nominal closing inventory for ease of use across exports and components
@@ -4200,11 +4234,17 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[9px] text-slate-400">
-                  <span>({closingInvPercent}% × MTD Revenue)</span>
+                  <span>({calculationModel.closingInventoryPercent.toFixed(2)}% × MTD Revenue)</span>
                   <span className={calculationModel.isClosingInvSafe ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                     Max: {maxClosingInvPercent}% ({calculationModel.isClosingInvSafe ? 'AMAN' : 'OVER TARGET'})
                   </span>
                 </div>
+                {calculationModel.hasEndingInvFromReceiving && (
+                  <div className="pt-1.5 mt-1 border-t border-emerald-500/20 text-[9px] text-emerald-400 font-bold flex items-center gap-1">
+                    <i className="fas fa-check-circle text-[10px]"></i>
+                    <span>Tersinkron dari Ending Inventory Receiving Sheet (Rp {calculationModel.endingInventoryNominal.toLocaleString('id-ID')})</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">

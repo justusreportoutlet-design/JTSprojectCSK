@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import ShareActions from './ShareActions';
 import { RegionalSummaryReportRecapTable, OutletSummaryRecapItem, resolvePattyCashBudget } from './RegionalSummaryReportRecapTable';
+import { calculateReceivingSheetTotalBelanja } from '../lib/moduleAnalytics';
 
 interface Props {
   data: AppState;
@@ -492,7 +493,12 @@ export const SummaryReportModule: React.FC<Props> = ({
       const mainKitchenBelanja = sumLedger(state.dailyMainKitchenLedger, monthKey).total;
       const grossMainStoreBelanja = sumLedger(state.dailyMainStoreLedger, monthKey).total;
       const mainStoreBelanja = Math.max(0, grossMainStoreBelanja - totalChemStatMkt);
-      const totalBelanjaOperasional = supplierBelanja + mainKitchenBelanja + mainStoreBelanja + cashRetailFoodBelanja;
+      
+      // Total Belanja Operasional & Food Cost (Diambil dari Total Belanja Fitur Receiving Sheet)
+      const rcTotals = calculateReceivingSheetTotalBelanja([state], selectedYear, selectedMonth);
+      const totalBelanjaOperasional = rcTotals.totalBelanja > 0 
+        ? rcTotals.totalBelanja 
+        : (supplierBelanja + mainKitchenBelanja + mainStoreBelanja + cashRetailFoodBelanja);
       const costBelanjaPercent = mtdRevenue > 0 ? (totalBelanjaOperasional / mtdRevenue) * 100 : 0;
 
       // 4. Patty Cash vs Budget
