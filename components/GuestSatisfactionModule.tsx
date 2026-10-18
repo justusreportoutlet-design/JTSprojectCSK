@@ -113,7 +113,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
   const [inputPrice, setInputPrice] = useState<string>('');
   const [inputPic, setInputPic] = useState<string>('');
   const [inputReason, setInputReason] = useState<string>('');
-  const [inputShift, setInputShift] = useState<'LUNCH' | 'CLOSING'>('LUNCH');
 
   React.useEffect(() => {
     if (!isRegionalView && propSelectedOutlet) {
@@ -138,18 +137,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
 
   const currentDayTotal = useMemo(() => {
     return currentDayItems.reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-  }, [currentDayItems]);
-
-  const currentDayLunchTotal = useMemo(() => {
-    return currentDayItems
-      .filter(it => it.shift === 'LUNCH')
-      .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-  }, [currentDayItems]);
-
-  const currentDayClosingTotal = useMemo(() => {
-    return currentDayItems
-      .filter(it => it.shift !== 'LUNCH')
-      .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
   }, [currentDayItems]);
 
   // Monthly overview stats for Sidebar
@@ -232,7 +219,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
       name: inputName.trim(),
       qty: qtyNum,
       price: priceNum,
-      shift: inputShift,
       pic: inputPic.trim() || 'Duty Manager / MOD',
       reason: inputReason.trim() || 'Komplain Tamu / Service Recovery'
     };
@@ -242,12 +228,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
       const curList = currentLedger[inputDate] || [];
       const updatedList = [...curList, newItem];
       const updatedDayTotal = updatedList.reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-      const updatedLunchTotal = updatedList
-        .filter(it => it.shift === 'LUNCH')
-        .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-      const updatedClosingTotal = updatedList
-        .filter(it => it.shift !== 'LUNCH')
-        .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
 
       const currentDayExpenses = (prev.expenses && prev.expenses[inputDate]) || {
         date: inputDate,
@@ -279,38 +259,13 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
         }
       };
 
-      const currentDailyRec = prev.dailyRecording || {};
-      const curRec = (currentDailyRec[inputDate] || {}) as any;
-      const diffLunch = updatedLunchTotal - (Number(curRec.customerSatLunch) || 0);
-      const diffClosing = updatedClosingTotal - (Number(curRec.customerSatClosing) || 0);
-      const updatedRec = {
-        ...curRec,
-        customerSatLunch: updatedLunchTotal,
-        customerSatClosing: updatedClosingTotal,
-        customerSatRevenue: updatedDayTotal,
-        discountLunch: Math.max(0, (Number(curRec.discountLunch) || 0) + diffLunch),
-        discountDinner: Math.max(0, (Number(curRec.discountDinner) || 0) + diffClosing),
-        totalDiscount: Math.max(0, (Number(curRec.totalDiscount) || 0) + diffLunch + diffClosing)
-      };
-
       return {
         ...prev,
         dailyCustomerSat: {
           ...currentLedger,
           [inputDate]: updatedList
         },
-        expenses: updatedExpenses,
-        dailyRecording: {
-          ...currentDailyRec,
-          [inputDate]: updatedRec
-        },
-        sales: {
-          ...(prev.sales || {}),
-          dailyRecording: {
-            ...((prev.sales && prev.sales.dailyRecording) || {}),
-            [inputDate]: updatedRec
-          }
-        }
+        expenses: updatedExpenses
       };
     });
 
@@ -319,7 +274,7 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
     setInputPrice('');
     setInputPic('');
     setInputReason('');
-    showToast?.(`Treatment "${newItem.name}" (${newItem.shift}) berhasil ditambahkan!`, 'success');
+    showToast?.(`Treatment "${newItem.name}" berhasil ditambahkan!`, 'success');
   };
 
   const handleDeleteItem = (itemId: string, itemName: string) => {
@@ -329,12 +284,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
       const curList = currentLedger[inputDate] || [];
       const updatedList = curList.filter(it => it.id !== itemId);
       const updatedDayTotal = updatedList.reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-      const updatedLunchTotal = updatedList
-        .filter(it => it.shift === 'LUNCH')
-        .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-      const updatedClosingTotal = updatedList
-        .filter(it => it.shift !== 'LUNCH')
-        .reduce((acc, it) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
 
       const currentDayExpenses = (prev.expenses && prev.expenses[inputDate]) || {
         date: inputDate,
@@ -358,20 +307,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
         gas: 0
       };
 
-      const currentDailyRec = prev.dailyRecording || {};
-      const curRec = (currentDailyRec[inputDate] || {}) as any;
-      const diffLunch = updatedLunchTotal - (Number(curRec.customerSatLunch) || 0);
-      const diffClosing = updatedClosingTotal - (Number(curRec.customerSatClosing) || 0);
-      const updatedRec = {
-        ...curRec,
-        customerSatLunch: updatedLunchTotal,
-        customerSatClosing: updatedClosingTotal,
-        customerSatRevenue: updatedDayTotal,
-        discountLunch: Math.max(0, (Number(curRec.discountLunch) || 0) + diffLunch),
-        discountDinner: Math.max(0, (Number(curRec.discountDinner) || 0) + diffClosing),
-        totalDiscount: Math.max(0, (Number(curRec.totalDiscount) || 0) + diffLunch + diffClosing)
-      };
-
       return {
         ...prev,
         dailyCustomerSat: {
@@ -383,17 +318,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
           [inputDate]: {
             ...currentDayExpenses,
             guestSatisfaction: updatedDayTotal
-          }
-        },
-        dailyRecording: {
-          ...currentDailyRec,
-          [inputDate]: updatedRec
-        },
-        sales: {
-          ...(prev.sales || {}),
-          dailyRecording: {
-            ...((prev.sales && prev.sales.dailyRecording) || {}),
-            [inputDate]: updatedRec
           }
         }
       };
@@ -1076,47 +1000,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
                 )}
 
                 <form onSubmit={handleAddItem} className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                  {/* PILIHAN SESI LUNCH DAN CLOSING */}
-                  <div className="md:col-span-12 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/80 p-3 rounded-2xl border border-white/10 shadow-inner">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                        <i className="fas fa-clock text-xs"></i>
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-black text-slate-200 uppercase tracking-wider block">
-                          Pilihan Sesi Diskon (Lunch / Closing) *
-                        </span>
-                        <span className="text-[8px] text-slate-400">
-                          Mempengaruhi nominal discount pada Template WA Revenue Lunch / Closing & Rekapan Discount Harian
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
-                      <button
-                        type="button"
-                        onClick={() => setInputShift('LUNCH')}
-                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 border ${
-                          inputShift === 'LUNCH'
-                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 ring-2 ring-amber-400/50'
-                            : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white hover:bg-slate-800'
-                        }`}
-                      >
-                        <i className="fas fa-sun text-xs"></i> LUNCH
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setInputShift('CLOSING')}
-                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 border ${
-                          inputShift === 'CLOSING'
-                            ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-indigo-500 shadow-md shadow-indigo-600/30 ring-2 ring-indigo-400/50'
-                            : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white hover:bg-slate-800'
-                        }`}
-                      >
-                        <i className="fas fa-moon text-xs"></i> CLOSING
-                      </button>
-                    </div>
-                  </div>
-
                   <div className="md:col-span-4">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                       Nama Menu / Bentuk Treatment *
@@ -1205,22 +1088,14 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
 
               {/* LIST OF TODAY'S TRANSACTIONS */}
               <div className="glass-card p-5 bg-slate-900/90 border border-emerald-500/20 rounded-3xl shadow-xl space-y-3">
-                <div className="flex flex-wrap justify-between items-center border-b border-white/10 pb-2.5 gap-2">
+                <div className="flex justify-between items-center border-b border-white/10 pb-2.5">
                   <div className="flex items-center gap-2">
                     <i className="fas fa-face-smile text-emerald-400"></i>
                     <h4 className="text-xs font-black uppercase tracking-wider text-white">Daftar Treatment Tamu ({inputDate})</h4>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/20 flex items-center gap-1">
-                      <i className="fas fa-sun text-[9px]"></i> Lunch: Rp {currentDayLunchTotal.toLocaleString('id-ID')}
-                    </span>
-                    <span className="text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/20 flex items-center gap-1">
-                      <i className="fas fa-moon text-[9px]"></i> Closing: Rp {currentDayClosingTotal.toLocaleString('id-ID')}
-                    </span>
-                    <span className="text-xs font-mono font-black text-emerald-400 ml-1">
-                      Total: Rp {currentDayTotal.toLocaleString('id-ID')}
-                    </span>
-                  </div>
+                  <span className="text-xs font-mono font-bold text-emerald-400">
+                    Total: Rp {currentDayTotal.toLocaleString('id-ID')}
+                  </span>
                 </div>
 
                 {currentDayItems.length === 0 ? (
@@ -1233,7 +1108,6 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
                       <thead>
                         <tr className="bg-slate-900/90 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[9px]">
                           <th className="py-2 px-3">Item / Menu</th>
-                          <th className="py-2 px-3 text-center">Sesi / Shift</th>
                           <th className="py-2 px-3 text-center">Qty</th>
                           <th className="py-2 px-3 text-right">Harga</th>
                           <th className="py-2 px-3 text-right font-black">Subtotal</th>
@@ -1245,21 +1119,9 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
                       <tbody className="divide-y divide-white/5 font-mono text-[11px]">
                         {currentDayItems.map((it: LedgerItem, idx: number) => {
                           const sub = (Number(it.qty) || 0) * (Number(it.price) || 0);
-                          const isLunch = it.shift === 'LUNCH';
                           return (
                             <tr key={it.id || idx} className="hover:bg-white/5">
                               <td className="py-2 px-3 font-sans font-bold text-white truncate max-w-[150px]">{it.name}</td>
-                              <td className="py-2 px-3 text-center">
-                                {isLunch ? (
-                                  <span className="px-2 py-0.5 rounded text-[8px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1">
-                                    <i className="fas fa-sun text-[7px]"></i> LUNCH
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded text-[8px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 inline-flex items-center gap-1">
-                                    <i className="fas fa-moon text-[7px]"></i> CLOSING
-                                  </span>
-                                )}
-                              </td>
                               <td className="py-2 px-3 text-center text-slate-300">{it.qty}</td>
                               <td className="py-2 px-3 text-right text-slate-400">Rp {(Number(it.price) || 0).toLocaleString('id-ID')}</td>
                               <td className="py-2 px-3 text-right font-black text-emerald-400">Rp {sub.toLocaleString('id-ID')}</td>
@@ -1269,8 +1131,7 @@ export const GuestSatisfactionModule: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteItem(it.id, it.name)}
-                                  className="w-6 h-6 rounded-md bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white transition-all flex items-center justify-center mx-auto cursor-pointer"
-                                  title="Hapus Item"
+                                  className="w-6 h-6 rounded-md bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white transition-all flex items-center justify-center mx-auto"
                                 >
                                   <i className="fas fa-trash text-[10px]"></i>
                                 </button>

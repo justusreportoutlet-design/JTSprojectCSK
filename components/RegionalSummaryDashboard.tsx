@@ -12,7 +12,6 @@ import {
   getActiveOutletConfigs 
 } from '../constants';
 import { createDefaultManpowerData, calculateManpowerSummary, extractOutletManpowerMap, resolveOutletManpowerData } from '../lib/manpowerUtils';
-import { calculateReceivingSheetTotalBelanja } from '../lib/moduleAnalytics';
 import { RegionalSummaryReportRecapTable, OutletSummaryRecapItem, resolvePattyCashBudget } from './RegionalSummaryReportRecapTable';
 import RegionalGSIRecapTable from './RegionalGSIRecapTable';
 import RegionalGoogleReviewRecapTable from './RegionalGoogleReviewRecapTable';
@@ -310,11 +309,8 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
       const mainKitchenBelanja = sumLedger((mData as any).dailyMainKitchenLedger, monthKey);
       const totalMSMK = mainStoreBelanja + mainKitchenBelanja;
 
-      // Total Belanja MTD & Food Cost (Diambil dari Total Belanja pada Fitur Receiving Sheet)
-      const rcTotals = calculateReceivingSheetTotalBelanja([mData], selectedYear, selectedMonth);
-      const totalBelanjaMTD = rcTotals.totalBelanja > 0 
-        ? rcTotals.totalBelanja 
-        : (totalSupplierBelanja + mainKitchenBelanja + mainStoreBelanja + cashRetailFoodBelanja);
+      // Total Belanja MTD (Supplier + MS Net + MK + Cash Retail Food)
+      const totalBelanjaMTD = totalSupplierBelanja + mainKitchenBelanja + mainStoreBelanja + cashRetailFoodBelanja;
       const belanjaRatio = mtdRevenue > 0 ? (totalBelanjaMTD / mtdRevenue) * 100 : 0;
 
       // D. Forecast Revenue compare dengan Sisa Hari

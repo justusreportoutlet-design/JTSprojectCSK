@@ -517,7 +517,6 @@ export interface LedgerItem {
   date?: string;
   description?: string;
   division?: 'BAR' | 'KITCHEN' | string;
-  shift?: 'LUNCH' | 'CLOSING';
 }
 
 export interface DailySalesData {
@@ -566,8 +565,6 @@ export interface DailySalesData {
   grabFoodLunch?: number;
   grabFoodDinner?: number;
   customerSatRevenue?: number;
-  customerSatLunch?: number;
-  customerSatClosing?: number;
   discManagementRevenue?: number;
   discManagementName?: string;
   // Cashier
@@ -980,7 +977,6 @@ export interface AppState {
   complimentary: LedgerItem[]; // Keep for legacy
   dailyComplimentary: Record<string, LedgerItem[]>;
   sales: SalesData;
-  dailyRecording?: Record<string, DailySalesData>;
   dailyTargets: Record<string, number>;
   holidays: string[];
   leaveRecords: LeaveRecord[];

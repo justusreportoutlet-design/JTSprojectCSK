@@ -292,21 +292,13 @@ const SalesModule: React.FC<Props> = ({
       dinnerPromo += (Number(batch.digibankRevenueDinner) || 0) + (Number(batch.digibankDiscount) || 0);
     }
 
-    const customerSatLunch = Number(batch.customerSatLunch) || 0;
-    const customerSatClosing = Number(batch.customerSatClosing) || 0;
-    const customerSatRevenue = (customerSatLunch + customerSatClosing > 0)
-      ? (customerSatLunch + customerSatClosing)
-      : (Number(batch.customerSatRevenue) || 0);
+    const discountLunch = lunchInvestor + lunchPakYudi + lunchCadangan + lunchMember + lunchPromo;
+    const discountDinner = dinnerInvestor + dinnerPakYudi + dinnerCadangan + dinnerMember + dinnerPromo;
 
-    const discountLunch = lunchInvestor + lunchPakYudi + lunchCadangan + lunchMember + lunchPromo + customerSatLunch;
-    const discountDinner = dinnerInvestor + dinnerPakYudi + dinnerCadangan + dinnerMember + dinnerPromo + customerSatClosing;
-
+    const customerSatRevenue = Number(batch.customerSatRevenue) || 0;
     const discManagementRevenue = Number(batch.discManagementRevenue) || 0;
 
-    // totalDiscount includes discountLunch (which has customerSatLunch) + discountDinner (which has customerSatClosing) + discManagementRevenue
-    // If legacy record had only customerSatRevenue without lunch/closing breakdown:
-    const residualCustSat = Math.max(0, customerSatRevenue - (customerSatLunch + customerSatClosing));
-    const totalDiscount = discountLunch + discountDinner + residualCustSat + discManagementRevenue;
+    const totalDiscount = discountLunch + discountDinner + customerSatRevenue + discManagementRevenue;
 
     return {
       discountLunch,
@@ -570,41 +562,25 @@ const SalesModule: React.FC<Props> = ({
     });
   }, [monthlyDiscountNames]);
 
-  // Calculate Customer Sat from Expenses automatically, separating Lunch and Closing
-  const { calculatedCustomerSatLunch, calculatedCustomerSatClosing, calculatedCustomerSat } = useMemo(() => {
+  // NEW: Calculate Customer Sat from Expenses automatically
+  const calculatedCustomerSat = useMemo(() => {
     const items = dailyCustomerSat[filters.startDate] || [];
-    let lunch = 0;
-    let closing = 0;
-    items.forEach((item) => {
+    return items.reduce((acc, item) => {
       const price = Number(item.price) || 0;
       const qty = Number(item.qty) || 0;
-      const sub = price * qty;
-      if (item.shift === 'LUNCH') {
-        lunch += sub;
-      } else {
-        closing += sub;
-      }
-    });
-    return {
-      calculatedCustomerSatLunch: lunch,
-      calculatedCustomerSatClosing: closing,
-      calculatedCustomerSat: lunch + closing,
-    };
+      return acc + price * qty;
+    }, 0);
   }, [dailyCustomerSat, filters.startDate]);
 
   useEffect(() => {
     setLocalBatch((prev) => {
       const nextBatch = {
         ...prev,
-        customerSatLunch: calculatedCustomerSatLunch,
-        customerSatClosing: calculatedCustomerSatClosing,
         customerSatRevenue: calculatedCustomerSat,
       };
       const discs = calculateDiscounts(nextBatch);
 
       if (
-        prev.customerSatLunch === calculatedCustomerSatLunch &&
-        prev.customerSatClosing === calculatedCustomerSatClosing &&
         prev.customerSatRevenue === calculatedCustomerSat &&
         prev.discountLunch === discs.discountLunch &&
         prev.discountDinner === discs.discountDinner &&
@@ -624,15 +600,9 @@ const SalesModule: React.FC<Props> = ({
     const currentDailyRecording = data.dailyRecording;
     if (currentDailyRecording?.[filters.startDate]) {
       const currentRec = currentDailyRecording[filters.startDate] as any;
-      if (
-        currentRec.customerSatRevenue !== calculatedCustomerSat ||
-        currentRec.customerSatLunch !== calculatedCustomerSatLunch ||
-        currentRec.customerSatClosing !== calculatedCustomerSatClosing
-      ) {
+      if (currentRec.customerSatRevenue !== calculatedCustomerSat) {
         const updatedRec = {
           ...currentRec,
-          customerSatLunch: calculatedCustomerSatLunch,
-          customerSatClosing: calculatedCustomerSatClosing,
           customerSatRevenue: calculatedCustomerSat,
         };
         const discs = calculateDiscounts(updatedRec);
@@ -654,7 +624,7 @@ const SalesModule: React.FC<Props> = ({
         });
       }
     }
-  }, [calculatedCustomerSatLunch, calculatedCustomerSatClosing, calculatedCustomerSat, filters.startDate, data]);
+  }, [calculatedCustomerSat, filters.startDate, data]);
 
   useEffect(() => {
     const autoTarget = dailyTargets[filters.startDate] || 0;
@@ -875,9 +845,7 @@ const SalesModule: React.FC<Props> = ({
       digibankRevenueLunch,
       digibankRevenueDinner,
       digibankDiscount,
-      customerSatRevenue: localBatch.customerSatRevenue || 0,
-      customerSatLunch: localBatch.customerSatLunch || 0,
-      customerSatClosing: localBatch.customerSatClosing || 0,
+      customerSatRevenue,
       discManagementRevenue,
       discManagementName,
     };
@@ -893,9 +861,7 @@ const SalesModule: React.FC<Props> = ({
       { name: liveTodayStats.cadanganName1 || monthlyDiscountNames.cadanganName1, total: (localBatch.discLunchCadangan1 || 0) + (localBatch.discDinnerCadangan1 || 0) },
       { name: liveTodayStats.cadanganName2 || monthlyDiscountNames.cadanganName2, total: (localBatch.discLunchCadangan2 || 0) + (localBatch.discDinnerCadangan2 || 0) },
       { name: liveTodayStats.cadanganName3 || monthlyDiscountNames.cadanganName3, total: (localBatch.discLunchCadangan3 || 0) + (localBatch.discDinnerCadangan3 || 0) },
-      { name: "CUST SATISFACTION (LUNCH)", total: localBatch.customerSatLunch || 0 },
-      { name: "CUST SATISFACTION (CLOSING)", total: localBatch.customerSatClosing || 0 },
-      ...((!localBatch.customerSatLunch && !localBatch.customerSatClosing && localBatch.customerSatRevenue) ? [{ name: "CUST SATISFACTION", total: localBatch.customerSatRevenue || 0 }] : []),
+      { name: "CUST SATISFACTION", total: localBatch.customerSatRevenue || 0 },
       { name: "MANAGEMENT", total: localBatch.discManagementRevenue || 0 },
     ];
 
@@ -1819,21 +1785,9 @@ const SalesModule: React.FC<Props> = ({
     const grabFood = liveTodayStats.grabFoodLunch || 0;
     const lunchDineIn = lunchRev - takeAway - goFood - grabFood;
 
-    const csItems = (data.dailyCustomerSat && data.dailyCustomerSat[filters.startDate]) || [];
-    let fallbackCsLunch = 0;
-    let fallbackCsClosing = 0;
-    if (csItems.length > 0) {
-      csItems.forEach((it: any) => {
-        const sub = (Number(it.qty) || 0) * (Number(it.price) || 0);
-        if (it.shift === 'LUNCH') fallbackCsLunch += sub;
-        else fallbackCsClosing += sub;
-      });
-    }
-
     const discPakYudi = liveTodayStats.discLunchPakYudi;
     const discInvestor = liveTodayStats.discLunchInvestor;
-    const extraDiscCustomerSatLunch = liveTodayStats.customerSatLunch || fallbackCsLunch || 0;
-    const extraDiscCustomerSat = liveTodayStats.customerSatRevenue || (fallbackCsLunch + fallbackCsClosing) || 0;
+    const extraDiscCustomerSat = liveTodayStats.customerSatRevenue || 0;
     const extraDiscManagement = liveTodayStats.discManagementRevenue || 0;
     const extraDiscManagementName = liveTodayStats.discManagementName || "-";
 
@@ -1915,7 +1869,8 @@ ${activeBankPromos.map((promo, idx) => {
 * *Revenue* : Rp. ${formatIDR(pVals.revLunch)}`;
 }).join('\n\n')}`}
 
-${extraDiscCustomerSatLunch > 0 ? `*EXTRA DISCOUNTS*\n1. *Customer Satisfaction (Lunch)* : Rp.${formatIDR(extraDiscCustomerSatLunch)}\n\n` : ''}*CASHIER*
+
+*CASHIER*
 * *Petty Cash* : Rp. ${formatIDR(pettyCash)}
 * *Setor Tunai Bank BCA* : Rp. ${formatIDR(setorTunai)}
 
@@ -1956,7 +1911,7 @@ ${extraDiscCustomerSatLunch > 0 ? `*EXTRA DISCOUNTS*\n1. *Customer Satisfaction 
 
     const discPakYudi = liveTodayStats.discDinnerPakYudi;
     const discInvestor = liveTodayStats.discDinnerInvestor;
-    const extraDiscCustomerSatClosing = liveTodayStats.customerSatClosing || liveTodayStats.customerSatRevenue || 0;
+    const extraDiscCustomerSat = liveTodayStats.customerSatRevenue || 0;
     const extraDiscManagement = liveTodayStats.discManagementRevenue || 0;
     const extraDiscManagementName = liveTodayStats.discManagementName || "-";
 
@@ -2034,7 +1989,7 @@ ${!isBankPromoEnabled || activeBankPromos.length === 0 ? `* Bank Promo : [NONAKT
 * *Notes* : ${inputNonFood || "-"}
 
 *EXTRA DISCOUNTS*
-1. *Customer Satisfaction (Closing)* : Rp.${formatIDR(extraDiscCustomerSatClosing)}
+1. *Customer Satisfaction* : Rp.${formatIDR(extraDiscCustomerSat)}
 2. *Discount Management* : ${extraDiscManagementName} / Rp.${formatIDR(extraDiscManagement)}
 
 *Best Regards & Thank you*`;
@@ -2075,11 +2030,7 @@ ${!isBankPromoEnabled || activeBankPromos.length === 0 ? `* Bank Promo : [NONAKT
     const discInvestor =
       liveTodayStats.discLunchInvestor + liveTodayStats.discDinnerInvestor;
 
-    const extraDiscCustomerSatLunch = liveTodayStats.customerSatLunch || 0;
-    const extraDiscCustomerSatClosing = liveTodayStats.customerSatClosing || 0;
-    const extraDiscCustomerSat = (liveTodayStats.customerSatRevenue && liveTodayStats.customerSatRevenue > 0)
-      ? liveTodayStats.customerSatRevenue
-      : (extraDiscCustomerSatLunch + extraDiscCustomerSatClosing);
+    const extraDiscCustomerSat = liveTodayStats.customerSatRevenue || 0;
     const extraDiscManagement = liveTodayStats.discManagementRevenue || 0;
     const extraDiscManagementName = liveTodayStats.discManagementName || "-";
 
@@ -2161,8 +2112,8 @@ ${activeBankPromos.map((promo, idx) => {
 * *Revenue* : Rp. ${formatIDR(pVals.revClosing)}`;
 }).join('\n\n')}`}
 
-${(extraDiscCustomerSat > 0 || extraDiscManagement > 0) ? `*EXTRA DISCOUNTS*
-${extraDiscCustomerSat > 0 ? `1. *Customer Satisfaction* : Rp. ${formatIDR(extraDiscCustomerSat)}${(extraDiscCustomerSatLunch > 0 || extraDiscCustomerSatClosing > 0) ? ` (Lunch: Rp. ${formatIDR(extraDiscCustomerSatLunch)} | Closing: Rp. ${formatIDR(extraDiscCustomerSatClosing)})` : ''}\n` : ''}${extraDiscManagement > 0 ? `2. *Discount Management* : ${extraDiscManagementName} / Rp. ${formatIDR(extraDiscManagement)}\n` : ''}\n` : ''}*CASHIER*
+
+*CASHIER*
 * *Petty Cash* : Rp. ${formatIDR(pettyCash)}
 * *Setor Tunai Bank BCA* : Rp. ${formatIDR(setorTunai)}
 * *Input Non Food* : ${inputNonFood || "-"}
@@ -2991,12 +2942,9 @@ ${extraDiscCustomerSat > 0 ? `1. *Customer Satisfaction* : Rp. ${formatIDR(extra
                         )}
                       </div>
                       <div className="space-y-1">
-                        <div className="flex justify-between items-center text-[7px] text-slate-500 uppercase font-black">
-                          <span>Auto-Calculated Total</span>
-                          <span className="text-slate-400">
-                            Lunch: <b className="text-amber-400">Rp {(localBatch.customerSatLunch || 0).toLocaleString('id-ID')}</b> | Closing: <b className="text-indigo-400">Rp {(localBatch.customerSatClosing || 0).toLocaleString('id-ID')}</b>
-                          </span>
-                        </div>
+                        <label className="text-[7px] text-slate-500 uppercase font-black">
+                          Auto-Calculated Amount
+                        </label>
                         <div className="relative">
                           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-700 text-[8px] font-black">
                             RP
@@ -3009,18 +2957,13 @@ ${extraDiscCustomerSat > 0 ? `1. *Customer Satisfaction* : Rp. ${formatIDR(extra
                           />
                         </div>
                         <p className="text-[7px] text-emerald-400 font-bold italic flex items-center gap-1">
-                          <i className="fas fa-link text-[6px]"></i> Terhubung otomatis dari Fitur Guest Satisfaction (Lunch & Closing)
+                          <i className="fas fa-link text-[6px]"></i> Terhubung otomatis dari Fitur Guest Satisfaction
                         </p>
                         {(dailyCustomerSat[filters.startDate] || []).length > 0 && (
                           <div className="mt-2 pt-2 border-t border-rose-500/10 space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
                             {(dailyCustomerSat[filters.startDate] || []).map((it, idx) => (
-                              <div key={idx} className="flex justify-between items-center text-[7px] text-slate-400 bg-slate-900/60 p-1.5 rounded border border-white/5">
-                                <span className="font-semibold text-slate-300 truncate max-w-[140px] flex items-center gap-1">
-                                  <span className={`px-1 py-0.2 rounded text-[6px] font-black ${it.shift === 'LUNCH' ? 'bg-amber-500/20 text-amber-300' : 'bg-indigo-500/20 text-indigo-300'}`}>
-                                    {it.shift === 'LUNCH' ? 'L' : 'C'}
-                                  </span>
-                                  {it.name} ({it.qty}x)
-                                </span>
+                              <div key={idx} className="flex justify-between text-[7px] text-slate-400 bg-slate-900/60 p-1.5 rounded border border-white/5">
+                                <span className="font-semibold text-slate-300 truncate max-w-[140px]">{it.name} ({it.qty}x)</span>
                                 <span className="font-bold text-rose-400">Rp {((Number(it.qty) || 0) * (Number(it.price) || 0)).toLocaleString('id-ID')}</span>
                               </div>
                             ))}
