@@ -541,26 +541,6 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
 
   const discountBreakdown = useMemo(() => {
     const rec = todayRec as DailySalesData;
-
-    // Check Customer Satisfaction lunch & closing from rec or mergedDailyCustomerSat
-    const custSatItems = (mergedDailyCustomerSat && mergedDailyCustomerSat[safeStartDate]) || [];
-    let lunchCustSat = Number(rec?.customerSatLunch) || 0;
-    let closingCustSat = Number(rec?.customerSatClosing) || 0;
-    if (custSatItems.length > 0) {
-      let lSum = 0;
-      let cSum = 0;
-      custSatItems.forEach((it: any) => {
-        const sub = (Number(it.qty) || 0) * (Number(it.price) || 0);
-        if (it.shift === 'LUNCH') lSum += sub;
-        else cSum += sub;
-      });
-      lunchCustSat = Math.max(lunchCustSat, lSum);
-      closingCustSat = Math.max(closingCustSat, cSum);
-    }
-    const totalCustSat = (lunchCustSat + closingCustSat > 0) 
-      ? (lunchCustSat + closingCustSat) 
-      : (Number(rec?.customerSatRevenue) || 0);
-
     const list = [
       { name: 'PAK YUDI (CEO)', total: (rec.discLunchPakYudi || 0) + (rec.discDinnerPakYudi || 0) },
       { name: monthlyNames.investorName, total: (rec.discLunchInvestor || 0) + (rec.discDinnerInvestor || 0) },
@@ -572,12 +552,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
       { name: monthlyNames.cadanganName1, total: (rec.discLunchCadangan1 || 0) + (rec.discDinnerCadangan1 || 0) },
       { name: monthlyNames.cadanganName2, total: (rec.discLunchCadangan2 || 0) + (rec.discDinnerCadangan2 || 0) },
       { name: monthlyNames.cadanganName3, total: (rec.discLunchCadangan3 || 0) + (rec.discDinnerCadangan3 || 0) },
-      ...(lunchCustSat > 0 || closingCustSat > 0 ? [
-        { name: 'CUST SATISFACTION (LUNCH)', total: lunchCustSat },
-        { name: 'CUST SATISFACTION (CLOSING)', total: closingCustSat }
-      ] : [
-        { name: 'CUST SATISFACTION', total: totalCustSat }
-      ]),
+      { name: 'CUST SATISFACTION', total: rec.customerSatRevenue || 0 },
       { name: 'MANAGEMENT', total: rec.discManagementRevenue || 0 },
     ];
 
@@ -599,7 +574,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
     }
 
     return list.filter(d => d.total > 0);
-  }, [todayRec, monthlyNames, additionalPromoDefinitions, mergedDailyCustomerSat, safeStartDate]);
+  }, [todayRec, monthlyNames, additionalPromoDefinitions]);
   
   const mtdRev: number = Object.entries(dailyRecordings).reduce((acc: number, [date, curr]: [string, any]) => {
     if (isMTD(date)) {
@@ -638,15 +613,6 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
         });
       }
 
-      let dayCustSat = Number(rec.customerSatRevenue) || 0;
-      const lCs = Number(rec.customerSatLunch) || 0;
-      const cCs = Number(rec.customerSatClosing) || 0;
-      if (lCs + cCs > 0) {
-        dayCustSat = Math.max(dayCustSat, lCs + cCs);
-      } else if (dayCustSat === 0 && mergedDailyCustomerSat && mergedDailyCustomerSat[date] && Array.isArray(mergedDailyCustomerSat[date])) {
-        dayCustSat = mergedDailyCustomerSat[date].reduce((cAcc: number, it: any) => cAcc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
-      }
-
       const disc = (Number(rec.discLunchPakYudi) || 0) + (Number(rec.discDinnerPakYudi) || 0) +
         (Number(rec.discLunchInvestor) || 0) + (Number(rec.discDinnerInvestor) || 0) +
         (Number(rec.discLunchInvestor2) || 0) + (Number(rec.discDinnerInvestor2) || 0) +
@@ -656,7 +622,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
         (Number(rec.digibankRevenueLunch) || 0) + (Number(rec.digibankRevenueDinner) || 0) + (Number(rec.digibankDiscount) || 0) +
         (Number(rec.discLunchCadangan1) || 0) + (Number(rec.discLunchCadangan2) || 0) + (Number(rec.discLunchCadangan3) || 0) +
         (Number(rec.discDinnerCadangan1) || 0) + (Number(rec.discDinnerCadangan2) || 0) + (Number(rec.discDinnerCadangan3) || 0) +
-        dayCustSat + (Number(rec.discManagementRevenue) || 0) + promoExtra;
+        (Number(rec.customerSatRevenue) || 0) + (Number(rec.discManagementRevenue) || 0) + promoExtra;
       return acc + disc;
     }
     return acc;
@@ -1371,22 +1337,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
         const bankMega = (rec.bankMegaRevenueLunch || 0) + (rec.bankMegaRevenueDinner || 0);
         const digibank = (rec.digibankRevenueLunch || 0) + (rec.digibankRevenueDinner || 0) + (rec.digibankDiscount || 0);
         const membership = (rec.membershipRevenueLunch || 0) + (rec.membershipRevenueDinner || 0);
-        // Cust Sat Lunch and Closing breakdown
-        const csItems = (mergedDailyCustomerSat && mergedDailyCustomerSat[date]) || [];
-        let custSatLunch = Number(rec?.customerSatLunch) || 0;
-        let custSatClosing = Number(rec?.customerSatClosing) || 0;
-        if (csItems.length > 0) {
-          let lSum = 0;
-          let cSum = 0;
-          csItems.forEach((it: any) => {
-            const sub = (Number(it.qty) || 0) * (Number(it.price) || 0);
-            if (it.shift === 'LUNCH') lSum += sub;
-            else cSum += sub;
-          });
-          custSatLunch = Math.max(custSatLunch, lSum);
-          custSatClosing = Math.max(custSatClosing, cSum);
-        }
-        const custSat = (custSatLunch + custSatClosing > 0) ? (custSatLunch + custSatClosing) : (Number(rec.customerSatRevenue) || 0);
+        const custSat = rec.customerSatRevenue || 0;
         const cad1 = (rec.discLunchCadangan1 || 0) + (rec.discDinnerCadangan1 || 0);
         const cad2 = (rec.discLunchCadangan2 || 0) + (rec.discDinnerCadangan2 || 0);
         const cad3 = (rec.discLunchCadangan3 || 0) + (rec.discDinnerCadangan3 || 0);
@@ -1421,15 +1372,13 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
 
         return {
           date,
-          pakYudi, inv1, inv2, inv3, management, bankMega, digibank, membership, 
-          custSatLunch, custSatClosing, custSat, 
-          cad1, cad2, cad3,
+          pakYudi, inv1, inv2, inv3, management, bankMega, digibank, membership, custSat, cad1, cad2, cad3,
           promoDiscounts,
           promoTotal,
           total
         };
       });
-  }, [dailyRecordings, safeStartDate, additionalPromoDefinitions, mergedDailyCustomerSat]);
+  }, [dailyRecordings, safeStartDate, additionalPromoDefinitions]);
 
   const discountMonthlyTotals = useMemo(() => {
     const initPromoTotals: Record<string, number> = {};
@@ -1446,8 +1395,6 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
       acc.bankMega += curr.bankMega;
       acc.digibank += curr.digibank;
       acc.membership += curr.membership;
-      acc.custSatLunch += curr.custSatLunch;
-      acc.custSatClosing += curr.custSatClosing;
       acc.custSat += curr.custSat;
       acc.cad1 += curr.cad1;
       acc.cad2 += curr.cad2;
@@ -1460,8 +1407,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
       return acc;
     }, { 
       pakYudi: 0, inv1: 0, inv2: 0, inv3: 0, management: 0, 
-      bankMega: 0, digibank: 0, membership: 0, 
-      custSatLunch: 0, custSatClosing: 0, custSat: 0, 
+      bankMega: 0, digibank: 0, membership: 0, custSat: 0, 
       cad1: 0, cad2: 0, cad3: 0,
       promoDiscounts: initPromoTotals,
       promoTotal: 0,
@@ -1633,15 +1579,13 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
     const promoHeaders = additionalPromoDefinitions.map(p => `${p.name} (Promo)`);
     const headers = [[
       'DATE', 'Pak Yudi', monthlyNames.investorName, monthlyNames.investorName2, monthlyNames.investorName3, 
-      'Mgmt', 'Bank Mega', 'Digibank', 'Memb', 'Cust Sat (Lunch)', 'Cust Sat (Closing)', 'Cust Sat Total', 
+      'Mgmt', 'Bank Mega', 'Digibank', 'Memb', 'Cust Sat', 
       monthlyNames.cadanganName1, monthlyNames.cadanganName2, monthlyNames.cadanganName3,
       ...promoHeaders,
       'TOTAL'
     ]];
     const rows = discountMonthlyLog.map(r => [
-      r.date, r.pakYudi, r.inv1, r.inv2, r.inv3, r.management, r.bankMega, r.digibank, r.membership, 
-      r.custSatLunch, r.custSatClosing, r.custSat, 
-      r.cad1, r.cad2, r.cad3,
+      r.date, r.pakYudi, r.inv1, r.inv2, r.inv3, r.management, r.bankMega, r.digibank, r.membership, r.custSat, r.cad1, r.cad2, r.cad3,
       ...additionalPromoDefinitions.map(p => r.promoDiscounts[p.id] || 0),
       r.total
     ]);
@@ -1655,8 +1599,6 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
       discountMonthlyLog.reduce((acc, c) => acc + c.bankMega, 0),
       discountMonthlyLog.reduce((acc, c) => acc + c.digibank, 0),
       discountMonthlyLog.reduce((acc, c) => acc + c.membership, 0),
-      discountMonthlyLog.reduce((acc, c) => acc + (c.custSatLunch || 0), 0),
-      discountMonthlyLog.reduce((acc, c) => acc + (c.custSatClosing || 0), 0),
       discountMonthlyLog.reduce((acc, c) => acc + c.custSat, 0),
       discountMonthlyLog.reduce((acc, c) => acc + c.cad1, 0),
       discountMonthlyLog.reduce((acc, c) => acc + c.cad2, 0),
@@ -2293,9 +2235,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
             <th className="p-2 border border-white/5 text-right">Bank Mega</th>
             <th className="p-2 border border-white/5 text-right">Digibank</th>
             <th className="p-2 border border-white/5 text-right">Memb</th>
-            <th className="p-2 border border-white/5 text-right whitespace-nowrap text-amber-300">Cust Sat (L)</th>
-            <th className="p-2 border border-white/5 text-right whitespace-nowrap text-indigo-300">Cust Sat (C)</th>
-            <th className="p-2 border border-white/5 text-right whitespace-nowrap">Cust Sat Total</th>
+            <th className="p-2 border border-white/5 text-right">Cust Sat</th>
             <th className="p-2 border border-white/5 text-right whitespace-nowrap">{monthlyNames.cadanganName1}</th>
             <th className="p-2 border border-white/5 text-right whitespace-nowrap">{monthlyNames.cadanganName2}</th>
             <th className="p-2 border border-white/5 text-right whitespace-nowrap">{monthlyNames.cadanganName3}</th>
@@ -2319,9 +2259,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
                       <td className={`p-2 border border-white/5 text-right ${row.bankMega > 0 ? 'text-white' : 'text-slate-700'}`}>{row.bankMega > 0 ? row.bankMega.toLocaleString('id-ID') : '-'}</td>
                       <td className={`p-2 border border-white/5 text-right ${row.digibank > 0 ? 'text-white' : 'text-slate-700'}`}>{row.digibank > 0 ? row.digibank.toLocaleString('id-ID') : '-'}</td>
                       <td className={`p-2 border border-white/5 text-right ${row.membership > 0 ? 'text-white' : 'text-slate-700'}`}>{row.membership > 0 ? row.membership.toLocaleString('id-ID') : '-'}</td>
-                      <td className={`p-2 border border-white/5 text-right font-mono ${row.custSatLunch > 0 ? 'text-amber-300 font-bold' : 'text-slate-700'}`}>{row.custSatLunch > 0 ? row.custSatLunch.toLocaleString('id-ID') : '-'}</td>
-                      <td className={`p-2 border border-white/5 text-right font-mono ${row.custSatClosing > 0 ? 'text-indigo-300 font-bold' : 'text-slate-700'}`}>{row.custSatClosing > 0 ? row.custSatClosing.toLocaleString('id-ID') : '-'}</td>
-                      <td className={`p-2 border border-white/5 text-right font-mono ${row.custSat > 0 ? 'text-white' : 'text-slate-700'}`}>{row.custSat > 0 ? row.custSat.toLocaleString('id-ID') : '-'}</td>
+                      <td className={`p-2 border border-white/5 text-right ${row.custSat > 0 ? 'text-white' : 'text-slate-700'}`}>{row.custSat > 0 ? row.custSat.toLocaleString('id-ID') : '-'}</td>
                       <td className={`p-2 border border-white/5 text-right ${row.cad1 > 0 ? 'text-white' : 'text-slate-700'}`}>{row.cad1 > 0 ? row.cad1.toLocaleString('id-ID') : '-'}</td>
                       <td className={`p-2 border border-white/5 text-right ${row.cad2 > 0 ? 'text-white' : 'text-slate-700'}`}>{row.cad2 > 0 ? row.cad2.toLocaleString('id-ID') : '-'}</td>
                       <td className={`p-2 border border-white/5 text-right ${row.cad3 > 0 ? 'text-white' : 'text-slate-700'}`}>{row.cad3 > 0 ? row.cad3.toLocaleString('id-ID') : '-'}</td>
@@ -2348,9 +2286,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
                      <td className="p-2 border border-white/10 text-right text-indigo-400">Rp {discountMonthlyTotals.bankMega.toLocaleString('id-ID')}</td>
                      <td className="p-2 border border-white/10 text-right text-indigo-400">Rp {discountMonthlyTotals.digibank.toLocaleString('id-ID')}</td>
                      <td className="p-2 border border-white/10 text-right text-emerald-400">Rp {discountMonthlyTotals.membership.toLocaleString('id-ID')}</td>
-                     <td className="p-2 border border-white/10 text-right text-amber-300 font-mono">Rp {discountMonthlyTotals.custSatLunch.toLocaleString('id-ID')}</td>
-                     <td className="p-2 border border-white/10 text-right text-indigo-300 font-mono">Rp {discountMonthlyTotals.custSatClosing.toLocaleString('id-ID')}</td>
-                     <td className="p-2 border border-white/10 text-right text-indigo-400 font-mono">Rp {discountMonthlyTotals.custSat.toLocaleString('id-ID')}</td>
+                     <td className="p-2 border border-white/10 text-right text-indigo-400">Rp {discountMonthlyTotals.custSat.toLocaleString('id-ID')}</td>
                      <td className="p-2 border border-white/10 text-right text-slate-500">Rp {discountMonthlyTotals.cad1.toLocaleString('id-ID')}</td>
                      <td className="p-2 border border-white/10 text-right text-slate-500">Rp {discountMonthlyTotals.cad2.toLocaleString('id-ID')}</td>
                      <td className="p-2 border border-white/10 text-right text-slate-500">Rp {discountMonthlyTotals.cad3.toLocaleString('id-ID')}</td>
