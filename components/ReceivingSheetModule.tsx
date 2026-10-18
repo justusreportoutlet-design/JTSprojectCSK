@@ -445,6 +445,9 @@ const ReceivingSheetModule: React.FC<Props> = ({
   // Save Inventory & RND
   const handleSaveInventory = () => {
     if (!onUpdate) return;
+    const rev = monthlyTotals.totalRevenue;
+    const calcPercent = rev > 0 ? Number(((inputEndingInv / rev) * 100).toFixed(2)) : (savedCogsData.closingInventoryPercent ?? 10.0);
+
     onUpdate(prev => {
       const next = { ...prev };
       if (!next.monthlyCogsData) next.monthlyCogsData = {};
@@ -453,11 +456,21 @@ const ReceivingSheetModule: React.FC<Props> = ({
         ...existing,
         beginningInventory: inputBeginInv,
         endingInventory: inputEndingInv,
+        closingInventoryPercent: calcPercent,
         rnd: inputRnd
       };
       return next;
     });
-    showToast?.("Data Inventory & R&D berhasil diperbarui.", "success");
+
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`COGS_CLOSING_INV_PERCENT_${monthKey}`, String(calcPercent));
+        localStorage.setItem(`COGS_CLOSING_INV_${monthKey}`, String(inputEndingInv));
+        localStorage.setItem(`COGS_OPENING_INV_${monthKey}`, String(inputBeginInv));
+      }
+    } catch (e) {}
+
+    showToast?.(`Data Inventory berhasil disimpan! Persentase Closing Inventory COGS diperbarui menjadi ${calcPercent}%.`, "success");
     setShowInventoryModal(false);
   };
 
@@ -1776,9 +1789,14 @@ const ReceivingSheetModule: React.FC<Props> = ({
 
               {/* ENDING INVENTORY */}
               <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
-                <label className="text-xs font-black uppercase text-rose-300 tracking-wider flex items-center gap-1.5">
-                  <i className="fas fa-archive"></i> Ending Inventory (Rp)
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-black uppercase text-rose-300 tracking-wider flex items-center gap-1.5">
+                    <i className="fas fa-archive"></i> Ending Inventory (Rp)
+                  </label>
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    Est. Closing Inv: {monthlyTotals.totalRevenue > 0 ? ((inputEndingInv / monthlyTotals.totalRevenue) * 100).toFixed(2) : '0.00'}%
+                  </span>
+                </div>
                 <input
                   type="number"
                   placeholder="0"
@@ -1786,6 +1804,10 @@ const ReceivingSheetModule: React.FC<Props> = ({
                   onChange={e => setInputEndingInv(Number(e.target.value))}
                   className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-mono font-bold text-white outline-none focus:ring-2 ring-rose-500"
                 />
+                <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                  <i className="fas fa-link text-emerald-400"></i>
+                  <span>Nilai Ending Inventory ini akan otomatis sinkron dan mempengaruhi <strong className="text-white">Persentase Closing Inventory pada Fitur COGS Outlet</strong> ({monthlyTotals.totalRevenue > 0 ? ((inputEndingInv / monthlyTotals.totalRevenue) * 100).toFixed(2) : '0.00'}% terhadap revenue MTD).</span>
+                </p>
               </div>
 
               {/* LIVE SIMULATION BOX */}

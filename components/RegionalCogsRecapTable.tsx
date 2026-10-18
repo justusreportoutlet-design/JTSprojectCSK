@@ -133,6 +133,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       let remainingWeekendCount = 0;
       let actualBelanjaMTD = 0;
 
+      let totalBelanjaFullMonth = 0;
+
       for (let d = 1; d <= daysInMonth; d++) {
         const dObj = new Date(selectedYear, selectedMonth, d);
         const dayOfWeek = dObj.getDay(); // 0 = Sun, 1..5 = Mon..Fri, 6 = Sat
@@ -170,6 +172,10 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         const chemList = monthDoc.dailyChemicalLedger?.[dateStr] || outletDoc.dailyChemicalLedger?.[dateStr];
         if (Array.isArray(chemList) && chemList.length > 0) {
           dayDeductions += chemList.reduce((acc: number, it: any) => acc + ((Number(it.qty) || 1) * (Number(it.price) || 0)), 0);
+        }
+        const atkList = monthDoc.dailyAtkLedger?.[dateStr] || outletDoc.dailyAtkLedger?.[dateStr];
+        if (Array.isArray(atkList) && atkList.length > 0) {
+          dayDeductions += atkList.reduce((acc: number, it: any) => acc + ((Number(it.qty) || 1) * (Number(it.price) || 0)), 0);
         }
         dayBelanja += Math.max(0, storeSum - dayDeductions);
 
@@ -214,6 +220,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           }
         }
 
+        totalBelanjaFullMonth += dayBelanja;
+
         if (d <= cutoffDay) {
           actualRevenueMTD += dayRev;
           actualBelanjaMTD += dayBelanja;
@@ -232,9 +240,11 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         }
       }
 
+      // 8. Total Belanja (Diambil dari Total Belanja Fitur Receiving Sheet)
+      let totalBelanja = totalBelanjaFullMonth > 0 ? totalBelanjaFullMonth : actualBelanjaMTD;
       // Check manual override for Belanja if enabled by outlet
       if (cogsData.useManualMtdBelanja && cogsData.manualMtdBelanja !== undefined && Number(cogsData.manualMtdBelanja) > 0) {
-        actualBelanjaMTD = Number(cogsData.manualMtdBelanja);
+        totalBelanja = Number(cogsData.manualMtdBelanja);
       }
 
       // 4. Forecast Sisa Hari
@@ -254,16 +264,20 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       // 6. Opening Inventory
       const openingInventory = Number(cogsData.beginningInventory) || 0;
 
-      // 7. Closing Inventory
-      const closingInvPercent = cogsData.closingInventoryPercent !== undefined 
+      // 7. Closing Inventory (Ending Inventory di Receiving Sheet mempengaruhi persentase closing inventory)
+      let closingInvPercent = cogsData.closingInventoryPercent !== undefined 
         ? Number(cogsData.closingInventoryPercent) 
         : 10.0;
-      const closingInventory = cogsData.endingInventory !== undefined && Number(cogsData.endingInventory) > 0
-        ? Number(cogsData.endingInventory)
-        : Math.round(totalProjectedFullMonth * (closingInvPercent / 100));
+      let closingInventory = Math.round(totalProjectedFullMonth * (closingInvPercent / 100));
 
-      // 8. Total Belanja
-      const totalBelanja = actualBelanjaMTD;
+      if (cogsData.endingInventory !== undefined && Number(cogsData.endingInventory) > 0) {
+        closingInventory = Number(cogsData.endingInventory);
+        if (totalProjectedFullMonth > 0) {
+          closingInvPercent = Number(((closingInventory / totalProjectedFullMonth) * 100).toFixed(2));
+        } else if (actualRevenueMTD > 0) {
+          closingInvPercent = Number(((closingInventory / actualRevenueMTD) * 100).toFixed(2));
+        }
+      }
 
       // 9. % Food Cost
       const percentFoodCost = actualRevenueMTD > 0
