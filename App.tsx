@@ -575,8 +575,18 @@ const App: React.FC = () => {
       Object.assign(mergedManpowerData, monthBase.manpowerData);
     }
 
+    const activeDailyRec = {
+      ...(monthBase.dailyRecording || {}),
+      ...((monthBase.sales && monthBase.sales.dailyRecording) || {})
+    };
+
     return {
       ...monthBase,
+      dailyRecording: activeDailyRec,
+      sales: {
+        ...(monthBase.sales || {}),
+        dailyRecording: activeDailyRec
+      },
       staffList,
       leaveRecords,
       logisticItems,
@@ -735,6 +745,8 @@ const App: React.FC = () => {
           dailyGSI: (globalData as any).dailyGSI || rawMVal.dailyGSI || {},
           guestComplaints: rawMVal.guestComplaints || globalData.guestComplaints,
           manpowerData: rawMVal.manpowerData || globalData.manpowerData || currentData.manpowerData,
+          dailyVoidBills: rawMVal.dailyVoidBills || activeOutletData[mKey]?.dailyVoidBills || {},
+          voidBills: rawMVal.voidBills || activeOutletData[mKey]?.voidBills || [],
         };
         activeOutletData[mKey] = mMerged;
         monthlyDataMap[mKey] = mMerged;
@@ -781,6 +793,8 @@ const App: React.FC = () => {
         dailyGSI: (globalData as any).dailyGSI || (currentData as any)?.dailyGSI || {},
         guestComplaints: globalData.guestComplaints,
         manpowerData: currentData.manpowerData || globalData.manpowerData,
+        dailyVoidBills: (currentData as any).dailyVoidBills || activeOutletData[currMonthKey]?.dailyVoidBills || {},
+        voidBills: (currentData as any).voidBills || activeOutletData[currMonthKey]?.voidBills || [],
       };
       activeOutletData[currMonthKey] = currentMonthMerged;
       monthlyDataMap[currMonthKey] = currentMonthMerged;
@@ -798,6 +812,8 @@ const App: React.FC = () => {
       activeOutletData.weeklyOvertime = globalData.weeklyOvertime;
       activeOutletData.dailyExternalAudit = globalData.dailyExternalAudit;
       activeOutletData.dailyCPA = globalData.dailyCPA;
+      activeOutletData.dailyVoidBills = (currentData as any).dailyVoidBills || activeOutletData.dailyVoidBills || {};
+      activeOutletData.voidBills = (currentData as any).voidBills || activeOutletData.voidBills || [];
       activeOutletData.dailyGSI = (globalData as any).dailyGSI;
       activeOutletData.guestComplaints = globalData.guestComplaints;
       activeOutletData.manpowerData = currentData.manpowerData || globalData.manpowerData;
@@ -1634,6 +1650,29 @@ const App: React.FC = () => {
         const monthKey = filters.month;
         const currentMonthBase = prev[monthKey] || INITIAL_STATE;
 
+        // Synchronize dailyRecording and sales.dailyRecording
+        if (monthlyUpdates.sales) {
+          const sDaily = monthlyUpdates.sales.dailyRecording || (monthlyUpdates.sales as any).sales?.dailyRecording;
+          if (sDaily) {
+            monthlyUpdates.dailyRecording = {
+              ...(currentMonthBase.dailyRecording || {}),
+              ...sDaily
+            };
+            monthlyUpdates.sales = {
+              ...monthlyUpdates.sales,
+              dailyRecording: monthlyUpdates.dailyRecording
+            };
+          }
+        } else if (monthlyUpdates.dailyRecording) {
+          monthlyUpdates.sales = {
+            ...(currentMonthBase.sales || {}),
+            dailyRecording: {
+              ...((currentMonthBase.sales && currentMonthBase.sales.dailyRecording) || {}),
+              ...monthlyUpdates.dailyRecording
+            }
+          };
+        }
+
         // If manpowerData is updated, replicate it across all 12 months in outletMonthlyData
         // so that switching months never encounters empty manpowerData!
         if (monthlyUpdates.manpowerData) {
@@ -1654,10 +1693,46 @@ const App: React.FC = () => {
           return nextMonths;
         }
 
-        return {
+        // Also ensure that if dates belong to specific month indices, those months in prev are also updated
+        const targetMonthsToUpdate: Record<string, Record<string, any>> = {};
+        if (monthlyUpdates.dailyRecording) {
+          Object.entries(monthlyUpdates.dailyRecording).forEach(([dStr, rec]) => {
+            const parts = dStr.split('-');
+            if (parts.length >= 2) {
+              const mIdx = parseInt(parts[1], 10) - 1;
+              if (!isNaN(mIdx) && mIdx >= 0 && mIdx < 12) {
+                const mKey = mIdx.toString();
+                if (!targetMonthsToUpdate[mKey]) targetMonthsToUpdate[mKey] = {};
+                targetMonthsToUpdate[mKey][dStr] = rec;
+              }
+            }
+          });
+        }
+
+        const nextMonths: Record<string, any> = {
           ...prev,
           [monthKey]: { ...currentMonthBase, ...monthlyUpdates }
         };
+
+        Object.entries(targetMonthsToUpdate).forEach(([tMKey, entries]) => {
+          if (tMKey !== monthKey) {
+            const tBase = nextMonths[tMKey] || INITIAL_STATE;
+            const updatedTDailyRec = {
+              ...(tBase.dailyRecording || {}),
+              ...entries
+            };
+            nextMonths[tMKey] = {
+              ...tBase,
+              dailyRecording: updatedTDailyRec,
+              sales: {
+                ...(tBase.sales || {}),
+                dailyRecording: updatedTDailyRec
+              }
+            };
+          }
+        });
+
+        return nextMonths;
       });
     }
 
@@ -1955,7 +2030,17 @@ const App: React.FC = () => {
             data={currentData.sales} 
             dailyTargets={currentData.dailyTargets} 
             filters={{...filters, outlet: user.selectedOutlet}}
-            onUpdate={(v, p) => updateCurrentData('sales', v, p !== undefined ? p : false)} 
+            onUpdate={(v, p) => {
+              const dailyRec = v.dailyRecording || (v.sales && v.sales.dailyRecording);
+              updateCurrentData({
+                sales: v,
+                dailyRecording: dailyRec
+              }, undefined, p !== undefined ? p : false);
+              try {
+                window.dispatchEvent(new CustomEvent('dailyRevenueUpdated', { detail: { sales: v } }));
+                window.dispatchEvent(new CustomEvent('appSalesUpdated', { detail: { sales: v } }));
+              } catch (e) {}
+            }} 
             showToast={showToast} 
             dailyCustomerSat={currentData.dailyCustomerSat || {}}
           />;

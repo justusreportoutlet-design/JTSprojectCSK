@@ -18,11 +18,19 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
   const reportRef = useRef<HTMLDivElement>(null);
   const [isProcessingPDF, setIsProcessingPDF] = useState(false);
   const [promoConfigVersion, setPromoConfigVersion] = useState<number>(0);
+  const [salesUpdateVersion, setSalesUpdateVersion] = useState<number>(0);
 
   useEffect(() => {
     const handlePromoChange = () => setPromoConfigVersion(v => v + 1);
+    const handleSalesChange = () => setSalesUpdateVersion(v => v + 1);
     window.addEventListener('appPromoSettingsChanged', handlePromoChange);
-    return () => window.removeEventListener('appPromoSettingsChanged', handlePromoChange);
+    window.addEventListener('dailyRevenueUpdated', handleSalesChange);
+    window.addEventListener('appSalesUpdated', handleSalesChange);
+    return () => {
+      window.removeEventListener('appPromoSettingsChanged', handlePromoChange);
+      window.removeEventListener('dailyRevenueUpdated', handleSalesChange);
+      window.removeEventListener('appSalesUpdated', handleSalesChange);
+    };
   }, []);
 
   const safeStartDate = useMemo(() => {
@@ -45,22 +53,26 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
     const map: Record<string, DailySalesData> = {};
     if (allMonthlyData) {
       (Object.values(allMonthlyData) as any[]).forEach(mState => {
-        if (mState?.sales?.dailyRecording) {
-          Object.assign(map, mState.sales.dailyRecording);
-        }
+        // Fallback first: legacy dailyRecording
         if (mState?.dailyRecording) {
           Object.assign(map, mState.dailyRecording);
         }
+        // Primary truth: sales.dailyRecording
+        if (mState?.sales?.dailyRecording) {
+          Object.assign(map, mState.sales.dailyRecording);
+        }
       });
     }
-    if (data?.sales?.dailyRecording) {
-      Object.assign(map, data.sales.dailyRecording);
-    }
+    // Fallback first: data.dailyRecording
     if (data?.dailyRecording) {
       Object.assign(map, data.dailyRecording);
     }
+    // Primary truth: data.sales.dailyRecording (ensures revisions always win)
+    if (data?.sales?.dailyRecording) {
+      Object.assign(map, data.sales.dailyRecording);
+    }
     return map;
-  }, [data?.sales?.dailyRecording, data?.dailyRecording, allMonthlyData]);
+  }, [data?.sales?.dailyRecording, data?.dailyRecording, allMonthlyData, salesUpdateVersion]);
 
   // Patty Cash & Third Party Merged Ledgers
   const mergedDailyNonCommodityLedger = useMemo(() => {
@@ -1172,7 +1184,7 @@ const ReportingModule: React.FC<Props> = ({ data, filters, selectedOutlet, allMo
           takeAway: { lunch: takeAwayLunch, dinner: takeAwayDinner, total: takeAwayTotal }
         };
       });
-  }, [dailyRecordings, filters.startDate]);
+  }, [dailyRecordings, safeStartDate, filters.startDate]);
 
   const salesHistoryTotals = useMemo(() => {
     return salesHistory.reduce((acc, curr) => {

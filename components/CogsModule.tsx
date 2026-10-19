@@ -1246,24 +1246,31 @@ export const CogsModule: React.FC<Props> = ({
       : dailyPurchasingBudgetRemaining;
 
     // 8. Inventory & COGS Calculations:
-    // If Ending Inventory is set in Receiving Sheet, it directly controls and affects Closing Inventory:
+    // Ending Inventory dari Receiving Sheet:
     const hasEndingInvFromReceiving = savedCogsData.endingInventory !== undefined && Number(savedCogsData.endingInventory) > 0;
     const endingInventoryNominal = hasEndingInvFromReceiving ? Number(savedCogsData.endingInventory) : 0;
+
+    // Estimasi Closing Inventory murni dari persentase yang diatur (terhubung Food Cost & COGS):
+    const estimatedClosingInvNominal = Math.round(totalProjectedRevenue * (closingInvPercent / 100));
+    const projectedCogsFromEstimatedClosing = Math.max(0, openingInventory + totalTargetBudgetBelanja - estimatedClosingInvNominal);
+    const projectedCogsPercentFromEstimatedClosing = totalProjectedRevenue > 0 ? (projectedCogsFromEstimatedClosing / totalProjectedRevenue) * 100 : 0;
+
+    // Persentase Ending Inventory dari Receiving Sheet terhadap Projected Revenue & MTD Revenue:
+    const endingInventoryProjectedPercent = totalProjectedRevenue > 0
+      ? Number(((endingInventoryNominal / totalProjectedRevenue) * 100).toFixed(2))
+      : 0;
+    const endingInventoryMtdPercent = actualRevenueMTD > 0
+      ? Number(((endingInventoryNominal / actualRevenueMTD) * 100).toFixed(2))
+      : 0;
 
     let closingInventory = 0;
     let closingInventoryPercent = closingInvPercent;
 
     if (hasEndingInvFromReceiving) {
       closingInventory = endingInventoryNominal;
-      if (totalProjectedRevenue > 0) {
-        closingInventoryPercent = Number(((endingInventoryNominal / totalProjectedRevenue) * 100).toFixed(2));
-      } else if (actualRevenueMTD > 0) {
-        closingInventoryPercent = Number(((endingInventoryNominal / actualRevenueMTD) * 100).toFixed(2));
-      } else if (savedCogsData.closingInventoryPercent !== undefined) {
-        closingInventoryPercent = savedCogsData.closingInventoryPercent;
-      }
+      closingInventoryPercent = endingInventoryProjectedPercent > 0 ? endingInventoryProjectedPercent : closingInvPercent;
     } else {
-      closingInventory = Math.round(totalProjectedRevenue * (closingInvPercent / 100));
+      closingInventory = estimatedClosingInvNominal;
       closingInventoryPercent = closingInvPercent;
     }
 
@@ -1417,7 +1424,12 @@ export const CogsModule: React.FC<Props> = ({
       divisions,
       daypartAnalytics,
       hasEndingInvFromReceiving,
-      endingInventoryNominal
+      endingInventoryNominal,
+      estimatedClosingInvNominal,
+      projectedCogsFromEstimatedClosing,
+      projectedCogsPercentFromEstimatedClosing,
+      endingInventoryProjectedPercent,
+      endingInventoryMtdPercent
     };
   }, [
     selectedMonth,
@@ -2093,7 +2105,13 @@ ${sc.isRecorded ? `- Realisasi Total Sales : Rp.${sc.actualTotal.toLocaleString(
       sheet.addRow(['Opening Inventory (Stok Awal) (+)', openingInventory]);
       sheet.addRow(['Purchased Budget Belanja (+)', calculationModel.totalTargetBudgetBelanja]);
       sheet.addRow(['MTD Actual Belanja (Receiving Sheet)', calculationModel.actualBelanjaMTD]);
-      sheet.addRow(['Closing Inventory (Stok Akhir) (-)', closingInventory]);
+      sheet.addRow(['Closing Inventory (Stok Akhir Digunakan) (-)', closingInventory]);
+      sheet.addRow(['Estimasi Closing Inventory (Setting ' + closingInvPercent + '%)', calculationModel.estimatedClosingInvNominal]);
+      if (calculationModel.hasEndingInvFromReceiving) {
+        sheet.addRow(['Ending Inventory (Receiving Sheet)', calculationModel.endingInventoryNominal]);
+        sheet.addRow(['% Ending Inventory terhadap Projected Revenue', `${calculationModel.endingInventoryProjectedPercent.toFixed(2)}%`]);
+        sheet.addRow(['% Ending Inventory terhadap MTD Revenue', `${calculationModel.endingInventoryMtdPercent.toFixed(2)}%`]);
+      }
       sheet.addRow(['Persentase Closing Inventory (% terhadap Projected Revenue)', `${calculationModel.closingInventoryPercent.toFixed(2)}%`]);
       sheet.addRow(['COGS / HPP (Opening + Budget Belanja - Closing)', calculationModel.effectiveCOGS]);
       sheet.addRow(['COGS %', `${calculationModel.actualCogsPercent.toFixed(2)}%`]);
@@ -2256,7 +2274,11 @@ ${sc.isRecorded ? `- Realisasi Total Sales : Rp.${sc.actualTotal.toLocaleString(
           ['TOTAL PROJECTED REVENUE BULAN INI', `Actual (1-${cutoffDay}) + Forecast Sisa Hari`, `Rp ${calculationModel.totalProjectedRevenue.toLocaleString('id-ID')}`],
           ['Opening Inventory (+)', 'Stok Awal Bulan', `Rp ${openingInventory.toLocaleString('id-ID')}`],
           ['MTD Actual Belanja (+)', `Total Cost Tgl 1 - ${cutoffDay}`, `Rp ${calculationModel.actualBelanjaMTD.toLocaleString('id-ID')}`],
-          ['Closing Inventory (-)', `${calculationModel.closingInventoryPercent.toFixed(2)}% dari MTD Revenue`, `Rp ${closingInventory.toLocaleString('id-ID')}`],
+          ['Closing Inventory (-)', `${calculationModel.closingInventoryPercent.toFixed(2)}% dari Projected Revenue`, `Rp ${closingInventory.toLocaleString('id-ID')}`],
+          ['Estimasi Closing Inv (Setting ' + closingInvPercent + '%)', `${closingInvPercent}% × Proj. Rev`, `Rp ${calculationModel.estimatedClosingInvNominal.toLocaleString('id-ID')}`],
+          ...(calculationModel.hasEndingInvFromReceiving ? [
+            ['Ending Inventory (Receiving Sheet)', `${calculationModel.endingInventoryProjectedPercent.toFixed(2)}% Proj. Rev (${calculationModel.endingInventoryMtdPercent.toFixed(2)}% MTD)`, `Rp ${calculationModel.endingInventoryNominal.toLocaleString('id-ID')}`]
+          ] : []),
           ['COGS / HPP Estimasi Bulan Ini', `Opening + Budget Belanja - Closing`, `Rp ${calculationModel.effectiveCOGS.toLocaleString('id-ID')} (${calculationModel.actualCogsPercent.toFixed(2)}%)`],
           ['Total Target Budget Belanja (' + targetBudgetPercent + '%)', `Projected Rev × ${targetBudgetPercent}%`, `Rp ${calculationModel.totalTargetBudgetBelanja.toLocaleString('id-ID')}`],
           ['SISA BUDGET BELANJA', `Alokasi Sisa ${calculationModel.remainingTotalDays} Hari (${calculationModel.remainingOrderDaysCount} Hari Order)`, `Rp ${calculationModel.sisaBudgetBelanja.toLocaleString('id-ID')}`],
@@ -2442,6 +2464,7 @@ ${sc.isRecorded ? `- Realisasi Total Sales : Rp.${sc.actualTotal.toLocaleString(
 - Opening Inventory : Rp.${openingInventory.toLocaleString('id-ID')}
 - Purchased Budget (${targetBudgetPercent.toFixed(2)}%) : Rp.${calculationModel.totalTargetBudgetBelanja.toLocaleString('id-ID')}
 - Closing Inventory (${calculationModel.closingInventoryPercent.toFixed(2)}%) : Rp.${calculationModel.closingInventory.toLocaleString('id-ID')}
+- Estimasi Closing Inv (${closingInvPercent}%) : Rp.${calculationModel.estimatedClosingInvNominal.toLocaleString('id-ID')}${calculationModel.hasEndingInvFromReceiving ? `\n- Ending Inventory Receiving Sheet (${calculationModel.endingInventoryProjectedPercent.toFixed(2)}% Proj. / MTD ${calculationModel.endingInventoryMtdPercent.toFixed(2)}%) : Rp.${calculationModel.endingInventoryNominal.toLocaleString('id-ID')}` : ''}
 - *COGS* (${calculationModel.actualCogsPercent.toFixed(2)}%) : *Rp.${calculationModel.effectiveCOGS.toLocaleString('id-ID')}*
 
 *Actual MTD Purchased Budget* : *Rp.${calculationModel.actualBelanjaMTD.toLocaleString('id-ID')}*
@@ -4175,7 +4198,7 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
 
           {/* Closing Inventory Percentage Input & Nominal Result Display */}
           <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/10 space-y-2 flex flex-col justify-between">
-            <div>
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                   3. % CLOSING INVENTORY (-)
@@ -4205,7 +4228,7 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
               </div>
 
               {/* Quick % Selection Chips */}
-              <div className="flex items-center gap-1.5 pt-1.5 overflow-x-auto">
+              <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto">
                 {[8, 9, 10, 10.5, 11].map(pct => (
                   <button
                     key={pct}
@@ -4225,33 +4248,104 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
                 ))}
               </div>
 
-              {/* Resulting Derived Nominal Closing Inventory Display */}
-              <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/5 space-y-1 mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-300">Nominal Stok Akhir:</span>
-                  <span className="text-sm font-black text-white">
-                    Rp {calculationModel.closingInventory.toLocaleString('id-ID')}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[9px] text-slate-400">
-                  <span>({calculationModel.closingInventoryPercent.toFixed(2)}% × MTD Revenue)</span>
-                  <span className={calculationModel.isClosingInvSafe ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                    Max: {maxClosingInvPercent}% ({calculationModel.isClosingInvSafe ? 'AMAN' : 'OVER TARGET'})
-                  </span>
-                </div>
-                {calculationModel.hasEndingInvFromReceiving && (
-                  <div className="pt-1.5 mt-1 border-t border-emerald-500/20 text-[9px] text-emerald-400 font-bold flex items-center gap-1">
-                    <i className="fas fa-check-circle text-[10px]"></i>
-                    <span>Tersinkron dari Ending Inventory Receiving Sheet (Rp {calculationModel.endingInventoryNominal.toLocaleString('id-ID')})</span>
-                  </div>
-                )}
+              {/* Hubungan ke Pengaturan Food Cost & COGS */}
+              <div className="flex items-center justify-between text-[9px] text-slate-400 px-1 pt-0.5 border-b border-white/5 pb-1.5">
+                <span>Target Food Cost: <strong className="text-emerald-400">{targetBudgetPercent}%</strong></span>
+                <span>Target COGS: <strong className="text-indigo-400">{targetBudgetPercent}%</strong></span>
               </div>
 
-              <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
-                <span>Estimasi Max Nom:</span>
-                <span className={calculationModel.isClosingInvSafe ? 'text-slate-300 font-bold' : 'text-rose-400 font-bold'}>
-                  Rp {calculationModel.maxClosingInvNominal.toLocaleString('id-ID')}
-                </span>
+              {/* 1. ESTIMASI CLOSING INVENTORY SESUAI SETTING % & TERHUBUNG FOOD COST / COGS */}
+              <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <i className="fas fa-calculator text-amber-400 text-xs"></i>
+                    <span className="text-[10px] font-black uppercase text-amber-300">Estimasi Closing Inv (Setting %)</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {closingInvPercent}% TARGET
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-black text-white">
+                    Rp {calculationModel.estimatedClosingInvNominal.toLocaleString('id-ID')}
+                  </span>
+                  <span className="text-[9px] text-slate-400">
+                    ({closingInvPercent}% × Proj. Rev)
+                  </span>
+                </div>
+                <div className="pt-1 border-t border-white/5 flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Korelasi COGS Estimasi:</span>
+                  <span className="text-indigo-300 font-bold">
+                    Rp {calculationModel.projectedCogsFromEstimatedClosing.toLocaleString('id-ID')} ({calculationModel.projectedCogsPercentFromEstimatedClosing.toFixed(2)}%)
+                  </span>
+                </div>
+              </div>
+
+              {/* 2. ENDING INVENTORY RECEIVING SHEET & PERSENTASE */}
+              {calculationModel.hasEndingInvFromReceiving ? (
+                <div className="p-3 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <i className="fas fa-receipt text-emerald-400 text-xs"></i>
+                      <span className="text-[10px] font-black uppercase text-emerald-300">Ending Inventory (Receiving Sheet)</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      <i className="fas fa-check-circle text-[8px]"></i> AKTIF DI COGS
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm font-black text-emerald-300">
+                      Rp {calculationModel.endingInventoryNominal.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  {/* Tampilan Persentase Ending Inventory */}
+                  <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-emerald-500/20 text-[9px]">
+                    <div className="bg-slate-900/80 p-1.5 rounded-lg border border-white/5">
+                      <span className="text-slate-400 block text-[8px]">% thd Projected Rev:</span>
+                      <span className="text-xs font-black text-emerald-400">{calculationModel.endingInventoryProjectedPercent.toFixed(2)}%</span>
+                    </div>
+                    <div className="bg-slate-900/80 p-1.5 rounded-lg border border-white/5">
+                      <span className="text-slate-400 block text-[8px]">% thd MTD Rev:</span>
+                      <span className="text-xs font-black text-teal-400">{calculationModel.endingInventoryMtdPercent.toFixed(2)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Selisih vs Estimasi Setting */}
+                  <div className="flex items-center justify-between text-[9px] pt-0.5 text-slate-300">
+                    <span>Selisih vs Estimasi ({closingInvPercent}%):</span>
+                    <span className={calculationModel.endingInventoryNominal > calculationModel.estimatedClosingInvNominal ? "text-amber-400 font-bold" : "text-emerald-400 font-bold"}>
+                      {calculationModel.endingInventoryNominal > calculationModel.estimatedClosingInvNominal ? "+" : ""}
+                      Rp {(calculationModel.endingInventoryNominal - calculationModel.estimatedClosingInvNominal).toLocaleString('id-ID')} ({(calculationModel.endingInventoryProjectedPercent - closingInvPercent).toFixed(2)}%)
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-dashed border-white/10 space-y-1">
+                  <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-bold">
+                    <i className="fas fa-info-circle text-sky-400"></i>
+                    <span>Ending Inventory Receiving Sheet:</span>
+                  </div>
+                  <p className="text-[9px] text-slate-500 leading-tight">
+                    Belum ada input Ending Inventory di Receiving Sheet. Menggunakan <strong>Estimasi Setting ({closingInvPercent}% = Rp {calculationModel.estimatedClosingInvNominal.toLocaleString('id-ID')})</strong> untuk perhitungan COGS.
+                  </p>
+                </div>
+              )}
+
+              {/* 3. STOK AKHIR YANG DIGUNAKAN DI COGS & BATAS MAKSIMAL */}
+              <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400">Stok Akhir Digunakan:</span>
+                  <span className="text-xs font-black text-white">
+                    Rp {calculationModel.closingInventory.toLocaleString('id-ID')} ({calculationModel.closingInventoryPercent.toFixed(2)}%)
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[9px] text-slate-500">
+                  <span>Batas Maksimal ({maxClosingInvPercent}%):</span>
+                  <span className={calculationModel.isClosingInvSafe ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    Rp {calculationModel.maxClosingInvNominal.toLocaleString('id-ID')} ({calculationModel.isClosingInvSafe ? 'AMAN' : 'OVER TARGET'})
+                  </span>
+                </div>
               </div>
             </div>
 

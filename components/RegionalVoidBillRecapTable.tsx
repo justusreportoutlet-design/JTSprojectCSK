@@ -5,9 +5,11 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 interface Props {
-  data: Record<string, any>; // allOutletsData: { [outletName]: { [monthKey]: AppState } }
+  data?: Record<string, any>;
+  allOutletsData?: Record<string, any>;
   selectedMonth: number; // 0-11
   selectedYear: number;
+  selectedArea?: string;
   selectedOutlet?: string;
   onSelectOutlet?: (outlet: string) => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -24,8 +26,10 @@ const formatIDR = (num: number) => {
 
 export const RegionalVoidBillRecapTable: React.FC<Props> = ({
   data,
+  allOutletsData,
   selectedMonth,
   selectedYear,
+  selectedArea = 'ALL',
   selectedOutlet = 'ALL',
   onSelectOutlet,
   showToast
@@ -34,6 +38,26 @@ export const RegionalVoidBillRecapTable: React.FC<Props> = ({
   const [searchStaff, setSearchStaff] = useState<string>('');
   const [minFrequencyFilter, setMinFrequencyFilter] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'STAFF_RANKING' | 'OUTLET_SUMMARY' | 'TRANSACTIONS'>('STAFF_RANKING');
+  const [updateVersion, setUpdateVersion] = useState<number>(0);
+
+  // Real-time listener for void bill submissions from any outlet
+  React.useEffect(() => {
+    const handleVoidUpdate = () => {
+      setUpdateVersion(v => v + 1);
+    };
+    window.addEventListener('voidBillsUpdated', handleVoidUpdate);
+    window.addEventListener('appVoidBillsUpdated', handleVoidUpdate);
+    return () => {
+      window.removeEventListener('voidBillsUpdated', handleVoidUpdate);
+      window.removeEventListener('appVoidBillsUpdated', handleVoidUpdate);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (selectedOutlet) {
+      setFilterOutlet(selectedOutlet);
+    }
+  }, [selectedOutlet]);
 
   const monthKey = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
   const monthName = MONTH_NAMES[selectedMonth] || 'Bulan';
@@ -42,47 +66,95 @@ export const RegionalVoidBillRecapTable: React.FC<Props> = ({
     return getActiveOutletNames();
   }, []);
 
+  const sourceData = useMemo(() => {
+    return allOutletsData || data || {};
+  }, [allOutletsData, data, updateVersion]);
+
   // Aggregate all void bills across all outlets for the selected period
   const allPeriodVoidBills = useMemo(() => {
     const records: VoidBillRecord[] = [];
+    const seenIds = new Set<string>();
 
     activeOutletList.forEach(outletName => {
-      const outletMonthData = data?.[outletName]?.[monthKey] || data?.[outletName]?.[String(selectedMonth)];
-      if (!outletMonthData) return;
+      // Find case-insensitive match for outlet key
+      const matchedKey = Object.keys(sourceData).find(
+        k => k.trim().toUpperCase() === outletName.trim().toUpperCase()
+      ) || outletName;
+      const outletRaw = sourceData?.[matchedKey] || {};
 
-      // Extract from dailyVoidBills
-      if (outletMonthData.dailyVoidBills && typeof outletMonthData.dailyVoidBills === 'object') {
-        Object.entries(outletMonthData.dailyVoidBills).forEach(([dKey, dayList]) => {
-          if (Array.isArray(dayList)) {
-            dayList.forEach(rec => {
-              if (rec && (rec.date ? rec.date.startsWith(monthKey) : true)) {
-                records.push({
-                  ...rec,
-                  outlet: rec.outlet || outletName
-                });
-              }
-            });
-          }
+      const candidateStates: any[] = [];
+
+      // 1. Month key index (e.g. "9")
+      if (outletRaw[String(selectedMonth)]) candidateStates.push(outletRaw[String(selectedMonth)]);
+      if (outletRaw[selectedMonth]) candidateStates.push(outletRaw[selectedMonth]);
+
+      // 2. YYYY-MM key (e.g. "2026-10")
+      if (outletRaw[monthKey]) candidateStates.push(outletRaw[monthKey]);
+
+      // 3. monthlyData map
+      if (outletRaw.monthlyData && typeof outletRaw.monthlyData === 'object') {
+        if (outletRaw.monthlyData[String(selectedMonth)]) candidateStates.push(outletRaw.monthlyData[String(selectedMonth)]);
+        if (outletRaw.monthlyData[selectedMonth]) candidateStates.push(outletRaw.monthlyData[selectedMonth]);
+        if (outletRaw.monthlyData[monthKey]) candidateStates.push(outletRaw.monthlyData[monthKey]);
+
+        // Also check all months inside monthlyData
+        Object.values(outletRaw.monthlyData).forEach((mVal: any) => {
+          if (mVal && !candidateStates.includes(mVal)) candidateStates.push(mVal);
         });
       }
 
-      // Extract from voidBills array
-      if (Array.isArray(outletMonthData.voidBills)) {
-        outletMonthData.voidBills.forEach(rec => {
-          if (rec && (rec.date ? rec.date.startsWith(monthKey) : true)) {
-            if (!records.some(r => r.id === rec.id)) {
-              records.push({
-                ...rec,
-                outlet: rec.outlet || outletName
+      // 4. Root outlet object itself
+      candidateStates.push(outletRaw);
+
+      candidateStates.forEach(st => {
+        if (!st) return;
+
+        // Extract from dailyVoidBills map: Record<dateStr, VoidBillRecord[]>
+        if (st.dailyVoidBills && typeof st.dailyVoidBills === 'object') {
+          Object.entries(st.dailyVoidBills).forEach(([dKey, dayList]) => {
+            if (Array.isArray(dayList)) {
+              dayList.forEach((rec: any) => {
+                if (rec && rec.id) {
+                  const recDate = String(rec.date || dKey || '');
+                  if (recDate.startsWith(monthKey)) {
+                    if (!seenIds.has(rec.id)) {
+                      seenIds.add(rec.id);
+                      records.push({
+                        ...rec,
+                        date: recDate,
+                        outlet: rec.outlet || outletName
+                      });
+                    }
+                  }
+                }
               });
             }
-          }
-        });
-      }
+          });
+        }
+
+        // Extract from flat voidBills array: VoidBillRecord[]
+        if (Array.isArray(st.voidBills)) {
+          st.voidBills.forEach((rec: any) => {
+            if (rec && rec.id) {
+              const recDate = String(rec.date || '');
+              if (recDate.startsWith(monthKey)) {
+                if (!seenIds.has(rec.id)) {
+                  seenIds.add(rec.id);
+                  records.push({
+                    ...rec,
+                    date: recDate,
+                    outlet: rec.outlet || outletName
+                  });
+                }
+              }
+            }
+          });
+        }
+      });
     });
 
     return records.sort((a, b) => b.date.localeCompare(a.date));
-  }, [data, activeOutletList, monthKey, selectedMonth]);
+  }, [sourceData, activeOutletList, monthKey, selectedMonth, updateVersion]);
 
   // Filtered void bills
   const filteredVoidBills = useMemo(() => {

@@ -405,7 +405,12 @@ export const VoidBillModule: React.FC<Props> = ({
         dailyVoidBills: prevDaily,
         voidBills: updatedFlat
       };
-    });
+    }, undefined, true);
+
+    try {
+      window.dispatchEvent(new CustomEvent('voidBillsUpdated', { detail: { record, outlet: currentOutlet } }));
+      window.dispatchEvent(new CustomEvent('appVoidBillsUpdated', { detail: { record, outlet: currentOutlet } }));
+    } catch (e) {}
 
     setIsModalOpen(false);
     showToast?.(editingItem ? 'Data Void Bill berhasil diperbarui!' : 'Void Bill baru berhasil dicatat!', 'success');
@@ -427,6 +432,12 @@ export const VoidBillModule: React.FC<Props> = ({
         voidBills: prevFlat
       };
     }, undefined, true);
+
+    try {
+      window.dispatchEvent(new CustomEvent('voidBillsUpdated', { detail: { deletedId: id, outlet: currentOutlet } }));
+      window.dispatchEvent(new CustomEvent('appVoidBillsUpdated', { detail: { deletedId: id, outlet: currentOutlet } }));
+    } catch (e) {}
+
     setDeleteConfirmId(null);
     showToast?.('Data Void Bill telah dihapus!', 'info');
   };

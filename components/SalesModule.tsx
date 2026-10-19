@@ -665,8 +665,8 @@ const SalesModule: React.FC<Props> = ({
   }, [filters.startDate, dailyTargets, data.dailyTarget]);
 
   const storedDailyRecord = useMemo(() => {
-    return data.dailyRecording?.[filters.startDate] || EMPTY_DAILY_RECORD;
-  }, [data.dailyRecording, filters.startDate]);
+    return data.dailyRecording?.[filters.startDate] || (data as any).sales?.dailyRecording?.[filters.startDate] || EMPTY_DAILY_RECORD;
+  }, [data.dailyRecording, (data as any).sales?.dailyRecording, filters.startDate]);
 
   // Dynamic MTD calculation for accurate display
   const mtdStats = useMemo(() => {
@@ -1376,6 +1376,11 @@ const SalesModule: React.FC<Props> = ({
           todayCovers: 0,
         }, true);
 
+        try {
+          window.dispatchEvent(new CustomEvent('dailyRevenueUpdated', { detail: { date: filters.startDate, deletedAll: true } }));
+          window.dispatchEvent(new CustomEvent('appSalesUpdated', { detail: { date: filters.startDate, deletedAll: true } }));
+        } catch (e) {}
+
         setShowSuccess({
           title: "SEMUA DATA DIHAPUS",
           message: `Seluruh data sales untuk bulan ${monthPrefix} telah dihapus.`,
@@ -1418,6 +1423,11 @@ const SalesModule: React.FC<Props> = ({
           todayRevenue: 0,
           todayCovers: 0,
         }, true);
+
+        try {
+          window.dispatchEvent(new CustomEvent('dailyRevenueUpdated', { detail: { date: filters.startDate, deleted: true } }));
+          window.dispatchEvent(new CustomEvent('appSalesUpdated', { detail: { date: filters.startDate, deleted: true } }));
+        } catch (e) {}
 
         setLocalBatch({
           lunchRevenue: 0,
@@ -1774,6 +1784,11 @@ const SalesModule: React.FC<Props> = ({
       todayDiscLunchBankMega: Number(updatedBankMegaRevenueLunch) || 0,
       todayDiscDinnerBankMega: Number(updatedBankMegaRevenueDinner) || 0,
     }, true);
+
+    try {
+      window.dispatchEvent(new CustomEvent('dailyRevenueUpdated', { detail: { record: updatedRecord, date: filters.startDate } }));
+      window.dispatchEvent(new CustomEvent('appSalesUpdated', { detail: { record: updatedRecord, date: filters.startDate } }));
+    } catch (e) {}
 
     setTimeout(() => {
       setIsSubmitting(false);
