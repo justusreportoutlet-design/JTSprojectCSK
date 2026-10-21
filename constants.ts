@@ -1,4 +1,4 @@
-import { Staff, AppState, GSIRow, Division, Outlet, OutletConfig, BankingPromoItem, StrategyMenuItem } from './types';
+import { Staff, AppState, GSIRow, Division, Outlet, OutletConfig, BankingPromoItem, StrategyMenuItem, CustomSupplier } from './types';
 
 export const DIVISIONS: Division[] = ['SERVICE', 'KITCHEN', 'BAR', 'STORE KEEPER'];
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -420,6 +420,8 @@ export const INITIAL_STATE: AppState = {
   logisticPeriodPrices: {},
   dailyVoidBills: {},
   voidBills: [],
+  customSuppliers: [],
+  dailyCustomSupplierLedgers: {},
 };
 
 export const QA_PASSING_SCORES = {
@@ -603,4 +605,43 @@ export const saveStoredStrategyCatalog = (items: StrategyMenuItem[]) => {
     }
   } catch (e) {}
 };
+
+export const DEFAULT_CORE_SUPPLIERS = [
+  { id: 'sup_tgif', name: 'TGIF', category: 'Daging & Olahan Protein', icon: 'fa-truck-loading', color: 'border-red-500/30 bg-red-500/10 text-red-400' },
+  { id: 'sup_sukanda', name: 'Sukanda Djaya', category: 'Dairy, Bakery & Frozen Food', icon: 'fa-box', color: 'border-blue-500/30 bg-blue-500/10 text-blue-400' },
+  { id: 'sup_everest', name: 'Everest', category: 'Seafood & Daging Beku', icon: 'fa-mountain', color: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-400' },
+  { id: 'sup_ikigai', name: 'Ikigai', category: 'Ikan & Hasil Laut Segar', icon: 'fa-fish', color: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' },
+  { id: 'sup_panfila', name: 'Panfila', category: 'Bakery, Pastry & Bahan Baku', icon: 'fa-leaf', color: 'border-purple-500/30 bg-purple-500/10 text-purple-400' },
+  { id: 'sup_saung_kubil', name: 'Saung Kubil', category: 'Sayuran & Hasil Tani', icon: 'fa-seedling', color: 'border-amber-500/30 bg-amber-500/10 text-amber-400' },
+  { id: 'sup_kebunku', name: 'Kebunku', category: 'Sayuran Organik & Buah Segar', icon: 'fa-carrot', color: 'border-lime-500/30 bg-lime-500/10 text-lime-400' },
+  { id: 'sup_main_store', name: 'Main Store', category: 'Gudang Pusat / Dry Goods', icon: 'fa-warehouse', color: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-400' },
+  { id: 'sup_main_kitchen', name: 'Main Kitchen', category: 'Sentral Dapur / Semi-Finished', icon: 'fa-utensils', color: 'border-orange-500/30 bg-orange-500/10 text-orange-400' },
+  { id: 'sup_chemical', name: 'Chemical & Hygiene', category: 'Chemical & Cleaning Supplies', icon: 'fa-pump-soap', color: 'border-teal-500/30 bg-teal-500/10 text-teal-400' },
+  { id: 'sup_cash', name: 'Cash / Pasar Harian', category: 'Belanja Tunai & Pasar Tradisional', icon: 'fa-money-bill-wave', color: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400' },
+];
+
+export const getStoredCustomSuppliers = (): CustomSupplier[] => {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('APP_CUSTOM_SUPPLIERS');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    }
+  } catch (e) {}
+  return [];
+};
+
+export const saveStoredCustomSuppliers = (suppliers: CustomSupplier[]) => {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('APP_CUSTOM_SUPPLIERS', JSON.stringify(suppliers));
+      window.dispatchEvent(new CustomEvent('appCustomSuppliersChanged', { detail: suppliers }));
+    }
+  } catch (e) {}
+};
+
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AppState, LedgerItem, CustomSupplier } from '../types';
 import { getOrderScheduleForOutlet } from '../constants';
 import ShareActions from './ShareActions';
@@ -84,6 +84,31 @@ const ReceivingSheetModule: React.FC<Props> = ({
   const [viewingDayRow, setViewingDayRow] = useState<DailyReceivingRow | null>(null);
 
   // Custom Suppliers State & Modal
+  const [localCustomSuppliers, setLocalCustomSuppliers] = useState<CustomSupplier[]>(() => {
+    if (data?.customSuppliers && data.customSuppliers.length > 0) return data.customSuppliers;
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_CUSTOM_SUPPLIERS') : null;
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  });
+
+  useEffect(() => {
+    if (data?.customSuppliers && data.customSuppliers.length > 0) {
+      setLocalCustomSuppliers(data.customSuppliers);
+    }
+  }, [data?.customSuppliers]);
+
+  useEffect(() => {
+    const handleSupChange = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setLocalCustomSuppliers(e.detail);
+      }
+    };
+    window.addEventListener('appCustomSuppliersChanged', handleSupChange);
+    return () => window.removeEventListener('appCustomSuppliersChanged', handleSupChange);
+  }, []);
+
   const [showAddSupplierModal, setShowAddSupplierModal] = useState<boolean>(false);
   const [newSupplierName, setNewSupplierName] = useState<string>('');
   const [newSupplierCategory, setNewSupplierCategory] = useState<string>('Mitra Supplier');
@@ -93,15 +118,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
 
   // Active dynamic suppliers (Default 10 + Custom Suppliers)
   const activeSupplierColumns = useMemo<SupplierColDef[]>(() => {
-    let customList: CustomSupplier[] = [];
-    if (data?.customSuppliers && data.customSuppliers.length > 0) {
-      customList = data.customSuppliers;
-    } else {
-      try {
-        const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_CUSTOM_SUPPLIERS') : null;
-        if (stored) customList = JSON.parse(stored);
-      } catch (e) {}
-    }
+    const customList = (data?.customSuppliers && data.customSuppliers.length > 0) ? data.customSuppliers : localCustomSuppliers;
     const customCols: SupplierColDef[] = customList.map(cs => ({
       id: cs.id,
       key: cs.key || `daily_${cs.id}_ledger`,
@@ -110,7 +127,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
       category: cs.category
     }));
     return [...DEFAULT_SUPPLIER_COLUMNS, ...customCols];
-  }, [data?.customSuppliers]);
+  }, [data?.customSuppliers, localCustomSuppliers]);
 
   // Handler to add new supplier
   const handleAddSupplier = () => {
@@ -1033,14 +1050,6 @@ const ReceivingSheetModule: React.FC<Props> = ({
             <span>Belanja Auto-Sync</span>
           </div>
 
-          <button
-            onClick={() => setShowAddSupplierModal(true)}
-            className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg active:scale-95 flex items-center gap-2 border border-indigo-400/30"
-            title="Tambah Supplier Baru"
-          >
-            <i className="fas fa-plus"></i>
-            Tambah Supplier
-          </button>
 
           <button
             onClick={handleExportExcel}

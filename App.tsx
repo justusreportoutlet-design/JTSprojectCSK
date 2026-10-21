@@ -204,7 +204,7 @@ const App: React.FC = () => {
   const [quotaExceededState, setQuotaExceededState] = useState(isQuotaExceeded());
   const [isPublicView, setIsPublicView] = useState(false);
   const [isOutletControlOpen, setIsOutletControlOpen] = useState(false);
-  const [outletControlTab, setOutletControlTab] = useState<'OUTLETS' | 'PROMO'>('OUTLETS');
+  const [outletControlTab, setOutletControlTab] = useState<'OUTLETS' | 'PROMO' | 'STRATEGI' | 'SUPPLIER'>('OUTLETS');
 
   useEffect(() => {
     const handleOpenOutletControl = (e: any) => {
@@ -2395,6 +2395,12 @@ const App: React.FC = () => {
         onClose={() => setIsOutletControlOpen(false)}
         initialTab={outletControlTab}
         showToast={showToast}
+        onSuppliersChange={(sups) => {
+          setGlobalData(prev => ({
+            ...prev,
+            customSuppliers: sups
+          }));
+        }}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { AppState, LedgerItem, Outlet } from '../types';
-import { OUTLETS, INITIAL_STATE } from '../constants';
+import { AppState, LedgerItem, Outlet, CustomSupplier } from '../types';
+import { OUTLETS, INITIAL_STATE, getStoredCustomSuppliers, saveStoredCustomSuppliers } from '../constants';
 import { safeStorage } from '../lib/safeStorage';
 import ShareActions from './ShareActions';
 import ExcelJS from 'exceljs';
@@ -135,6 +135,97 @@ export const SupplierExpenseModule: React.FC<Props> = ({
   const [includeProcurementChannelsInRecap, setIncludeProcurementChannelsInRecap] = useState<boolean>(false);
   const [alokasiCategoryFilter, setAlokasiCategoryFilter] = useState<'ALL' | 'SUPPLIERS' | 'INTERNAL'>('ALL');
   const [alokasiSearch, setAlokasiSearch] = useState<string>('');
+
+  // Custom Suppliers State & Handlers
+  const [customSuppliersList, setCustomSuppliersList] = useState<CustomSupplier[]>(() => {
+    if (data?.customSuppliers && data.customSuppliers.length > 0) return data.customSuppliers;
+    return getStoredCustomSuppliers();
+  });
+
+  React.useEffect(() => {
+    if (data?.customSuppliers && data.customSuppliers.length > 0) {
+      setCustomSuppliersList(data.customSuppliers);
+    }
+  }, [data?.customSuppliers]);
+
+  React.useEffect(() => {
+    const handleSupChange = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setCustomSuppliersList(e.detail);
+      }
+    };
+    window.addEventListener('appCustomSuppliersChanged', handleSupChange);
+    return () => window.removeEventListener('appCustomSuppliersChanged', handleSupChange);
+  }, []);
+
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState<boolean>(false);
+  const [newSupplierName, setNewSupplierName] = useState<string>('');
+  const [newSupplierCategory, setNewSupplierCategory] = useState<string>('Mitra Bahan Makanan');
+  const [newSupplierContact, setNewSupplierContact] = useState<string>('');
+  const [newSupplierPhone, setNewSupplierPhone] = useState<string>('');
+  const [newSupplierNotes, setNewSupplierNotes] = useState<string>('');
+
+  const handleAddSupplier = () => {
+    if (!newSupplierName.trim()) {
+      showToast?.('Mohon isi nama supplier baru!', 'error');
+      return;
+    }
+    const cleanId = 'sup_' + newSupplierName.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
+    const newSup: CustomSupplier = {
+      id: cleanId,
+      name: newSupplierName.trim(),
+      key: `daily_${cleanId}_ledger`,
+      category: newSupplierCategory || 'Mitra Bahan Makanan',
+      contactPerson: newSupplierContact.trim() || undefined,
+      phone: newSupplierPhone.trim() || undefined,
+      notes: newSupplierNotes.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    const updated = [...customSuppliersList, newSup];
+    setCustomSuppliersList(updated);
+    saveStoredCustomSuppliers(updated);
+
+    if (onUpdate) {
+      onUpdate(prev => ({
+        ...prev,
+        customSuppliers: updated
+      }));
+    }
+
+    showToast?.(`Supplier "${newSup.name}" berhasil ditambahkan ke Fitur Supplier!`, 'success');
+    setNewSupplierName('');
+    setNewSupplierContact('');
+    setNewSupplierPhone('');
+    setNewSupplierNotes('');
+    setShowAddSupplierModal(false);
+  };
+
+  const handleDeleteCustomSupplier = (supplierId: string, supplierName: string) => {
+    const updated = customSuppliersList.filter(s => s.id !== supplierId);
+    setCustomSuppliersList(updated);
+    saveStoredCustomSuppliers(updated);
+
+    if (onUpdate) {
+      onUpdate(prev => ({
+        ...prev,
+        customSuppliers: updated
+      }));
+    }
+    showToast?.(`Supplier "${supplierName}" berhasil dihapus.`, 'info');
+  };
+
+  const dynamicSuppliersList = useMemo<SupplierDef[]>(() => {
+    const customDefs: SupplierDef[] = customSuppliersList.map(cs => ({
+      key: cs.id,
+      label: cs.name,
+      ledgerKey: (cs.key || `daily_${cs.id}_ledger`) as keyof AppState,
+      expenseKey: cs.id,
+      icon: 'fa-truck-fast',
+      color: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+    }));
+    return [...SUPPLIERS_LIST, ...customDefs];
+  }, [customSuppliersList]);
 
   React.useEffect(() => {
     const saved = safeStorage.getItem(budgetStorageKey);
@@ -1371,6 +1462,14 @@ export const SupplierExpenseModule: React.FC<Props> = ({
             className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center gap-1.5 cursor-pointer"
           >
             <i className="fab fa-whatsapp"></i> WA Rekap
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAddSupplierModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center gap-1.5 cursor-pointer border border-indigo-400/30"
+            title="Tambah Rekanan Supplier Baru"
+          >
+            <i className="fas fa-plus"></i> Tambah Supplier
           </button>
           <ShareActions 
             targetId={reportId} 
@@ -2748,22 +2847,44 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
       {/* SUPPLIER BREAKDOWN CARDS */}
       <div className="space-y-3">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
             <i className="fas fa-store-alt text-rose-400"></i> Rekanan Supplier (Klik untuk Filter)
           </h3>
-          {activeSupplierFilter !== 'ALL' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeSupplierFilter !== 'ALL' && (
+              <button
+                onClick={() => setActiveSupplierFilter('ALL')}
+                className="text-xs text-rose-400 hover:underline font-bold"
+              >
+                Reset Filter (Tampilkan Semua)
+              </button>
+            )}
             <button
-              onClick={() => setActiveSupplierFilter('ALL')}
-              className="text-xs text-rose-400 hover:underline font-bold"
+              type="button"
+              onClick={() => setShowAddSupplierModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer border border-indigo-400/30"
+              title="Tambah Supplier Baru"
             >
-              Reset Filter (Tampilkan Semua)
+              <i className="fas fa-plus"></i> Tambah Supplier
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('openOutletControl', { detail: { tab: 'SUPPLIER' } }));
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs uppercase tracking-wider transition-all border border-white/10 flex items-center gap-1.5 cursor-pointer"
+              title="Kelola Master Supplier di Outlet Control"
+            >
+              <i className="fas fa-sliders-h"></i> Outlet Control
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-          {SUPPLIERS_LIST.map(sup => {
+          {dynamicSuppliersList.map(sup => {
             const sDetail = procurementSummary.supplierDetails.find(d => d.key === sup.key);
             const sData = supplierSummaries[sup.key] || { total: 0, itemsCount: 0, count: 0 };
             const isSelected = activeSupplierFilter === sup.key;
@@ -3396,6 +3517,188 @@ export const SupplierExpenseModule: React.FC<Props> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* MODAL: TAMBAH REKANAN SUPPLIER BARU */}
+      {showAddSupplierModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-lg w-full space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-emerald-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-lg">
+                  <i className="fas fa-truck-fast"></i>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                    Tambah Supplier Baru
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Daftarkan mitra supplier ke Fitur Supplier & Receiving Sheet
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddSupplierModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* NAMA SUPPLIER */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
+                <label className="text-xs font-black uppercase text-indigo-300 tracking-wider flex items-center gap-1.5">
+                  <i className="fas fa-building"></i> Nama Supplier / Vendor <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: PT Sumber Berkah / Surya Mandiri"
+                  value={newSupplierName}
+                  onChange={e => setNewSupplierName(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-500"
+                />
+              </div>
+
+              {/* KATEGORI SUPPLIER */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
+                <label className="text-xs font-black uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                  <i className="fas fa-tags text-indigo-400"></i> Kategori Produk / Supplier
+                </label>
+                <select
+                  value={newSupplierCategory}
+                  onChange={e => setNewSupplierCategory(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-500 cursor-pointer"
+                >
+                  <option value="Mitra Bahan Makanan">Mitra Bahan Makanan (Food & Ingredients)</option>
+                  <option value="Mitra Bahan Minuman">Mitra Bahan Minuman (Beverage & Bar)</option>
+                  <option value="Sayur & Buah Segar">Sayur & Buah Segar</option>
+                  <option value="Daging & Seafood">Daging, Ayam & Seafood</option>
+                  <option value="Kemasan & Disposable">Kemasan & Packaging</option>
+                  <option value="Peralatan & Chemical">Peralatan & Chemical</option>
+                  <option value="Supplier Pasar & Cash">Supplier Pasar & Cash</option>
+                  <option value="Vendor Operasional">Vendor Operasional Lainnya</option>
+                </select>
+              </div>
+
+              {/* KONTAK & TELEPON */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    PIC / Kontak Person
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Nama PIC (opsional)"
+                    value={newSupplierContact}
+                    onChange={e => setNewSupplierContact(e.target.value)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500"
+                  />
+                </div>
+                <div className="p-3 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    No. Telp / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="08123xxx (opsional)"
+                    value={newSupplierPhone}
+                    onChange={e => setNewSupplierPhone(e.target.value)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* CATATAN / TERMS */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                  Catatan / Syarat Pembayaran (TOP)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: TOP 14 Hari, Pengiriman Tiap Selasa & Jumat"
+                  value={newSupplierNotes}
+                  onChange={e => setNewSupplierNotes(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500"
+                />
+              </div>
+
+              {/* DAFTAR SUPPLIER KUSTOM YANG SUDAH DITAMBAHKAN */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-2">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  Daftar Rekanan Kustom Tambahan ({customSuppliersList.length})
+                </span>
+                {customSuppliersList.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">
+                    Belum ada rekanan kustom tambahan. 7 rekanan inti default aktif.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                    {customSuppliersList.map(cs => (
+                      <div key={cs.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-900 border border-white/5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-truck text-emerald-400 text-xs"></i>
+                          <span className="font-bold text-white">{cs.name}</span>
+                          {cs.category && (
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              {cs.category}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Hapus supplier "${cs.name}"?`)) {
+                              handleDeleteCustomSupplier(cs.id, cs.name);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-rose-400 transition-colors p-1 cursor-pointer"
+                          title="Hapus Supplier"
+                        >
+                          <i className="fas fa-trash-alt text-xs"></i>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-2 pt-4 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddSupplierModal(false);
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('openOutletControl', { detail: { tab: 'SUPPLIER' } }));
+                  }
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <i className="fas fa-sliders-h"></i> Buka Master Outlet Control
+              </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowAddSupplierModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs uppercase hover:bg-slate-700 transition-all cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddSupplier}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                >
+                  <i className="fas fa-plus"></i>
+                  Tambah Supplier
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
