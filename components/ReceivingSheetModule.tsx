@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AppState, LedgerItem } from '../types';
+import { AppState, LedgerItem, CustomSupplier } from '../types';
 import { getOrderScheduleForOutlet } from '../constants';
 import ShareActions from './ShareActions';
 import ExcelJS from 'exceljs';
@@ -14,7 +14,15 @@ interface Props {
   selectedOutlet?: string;
 }
 
-const SUPPLIER_COLUMNS = [
+export interface SupplierColDef {
+  id: string;
+  key: string;
+  label: string;
+  isCustom?: boolean;
+  category?: string;
+}
+
+export const DEFAULT_SUPPLIER_COLUMNS: SupplierColDef[] = [
   { id: 'mainStore', key: 'dailyMainStoreLedger', label: 'MAIN STORE' },
   { id: 'mainKitchen', key: 'dailyMainKitchenLedger', label: 'MAIN KITCHEN' },
   { id: 'cash', key: 'dailyCashLedger', label: 'CASH' },
@@ -25,7 +33,9 @@ const SUPPLIER_COLUMNS = [
   { id: 'sukanda', key: 'dailySukandaLedger', label: 'SUKANDA' },
   { id: 'ikigai', key: 'dailyIkigaiLedger', label: 'IKIGAI' },
   { id: 'kebunku', key: 'dailyKebunkuLedger', label: 'KEBUNKU' }
-] as const;
+];
+
+export const SUPPLIER_COLUMNS = DEFAULT_SUPPLIER_COLUMNS;
 
 export interface DeductedExpenseItem {
   id: string;
@@ -72,6 +82,100 @@ const ReceivingSheetModule: React.FC<Props> = ({
 
   // Modal / Viewing state for daily entries (Read-Only)
   const [viewingDayRow, setViewingDayRow] = useState<DailyReceivingRow | null>(null);
+
+  // Custom Suppliers State & Modal
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState<boolean>(false);
+  const [newSupplierName, setNewSupplierName] = useState<string>('');
+  const [newSupplierCategory, setNewSupplierCategory] = useState<string>('Mitra Supplier');
+  const [newSupplierContact, setNewSupplierContact] = useState<string>('');
+  const [newSupplierPhone, setNewSupplierPhone] = useState<string>('');
+  const [newSupplierNotes, setNewSupplierNotes] = useState<string>('');
+
+  // Active dynamic suppliers (Default 10 + Custom Suppliers)
+  const activeSupplierColumns = useMemo<SupplierColDef[]>(() => {
+    let customList: CustomSupplier[] = [];
+    if (data?.customSuppliers && data.customSuppliers.length > 0) {
+      customList = data.customSuppliers;
+    } else {
+      try {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_CUSTOM_SUPPLIERS') : null;
+        if (stored) customList = JSON.parse(stored);
+      } catch (e) {}
+    }
+    const customCols: SupplierColDef[] = customList.map(cs => ({
+      id: cs.id,
+      key: cs.key || `daily_${cs.id}_ledger`,
+      label: (cs.name || cs.id).toUpperCase(),
+      isCustom: true,
+      category: cs.category
+    }));
+    return [...DEFAULT_SUPPLIER_COLUMNS, ...customCols];
+  }, [data?.customSuppliers]);
+
+  // Handler to add new supplier
+  const handleAddSupplier = () => {
+    if (!newSupplierName.trim()) {
+      showToast?.('Mohon isi nama supplier baru!', 'error');
+      return;
+    }
+    const cleanId = 'sup_' + newSupplierName.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
+    const newSup: CustomSupplier = {
+      id: cleanId,
+      name: newSupplierName.trim(),
+      key: `daily_${cleanId}_ledger`,
+      category: newSupplierCategory || 'Mitra Supplier',
+      contactPerson: newSupplierContact.trim() || undefined,
+      phone: newSupplierPhone.trim() || undefined,
+      notes: newSupplierNotes.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    if (onUpdate) {
+      onUpdate(prev => {
+        const existing = prev.customSuppliers || [];
+        const updated = [...existing, newSup];
+        return {
+          ...prev,
+          customSuppliers: updated
+        };
+      });
+    }
+
+    try {
+      if (typeof window !== 'undefined') {
+        const existingRaw = localStorage.getItem('APP_CUSTOM_SUPPLIERS');
+        const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+        existingList.push(newSup);
+        localStorage.setItem('APP_CUSTOM_SUPPLIERS', JSON.stringify(existingList));
+      }
+    } catch (e) {}
+
+    showToast?.(`Supplier "${newSup.name}" berhasil ditambahkan! Kolom supplier baru otomatis muncul di Receiving Sheet.`, 'success');
+    setNewSupplierName('');
+    setNewSupplierContact('');
+    setNewSupplierPhone('');
+    setNewSupplierNotes('');
+    setShowAddSupplierModal(false);
+  };
+
+  const handleDeleteCustomSupplier = (supplierId: string, supplierName: string) => {
+    if (onUpdate) {
+      onUpdate(prev => ({
+        ...prev,
+        customSuppliers: (prev.customSuppliers || []).filter(s => s.id !== supplierId)
+      }));
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const existingRaw = localStorage.getItem('APP_CUSTOM_SUPPLIERS');
+        if (existingRaw) {
+          const list = JSON.parse(existingRaw).filter((s: any) => s.id !== supplierId);
+          localStorage.setItem('APP_CUSTOM_SUPPLIERS', JSON.stringify(list));
+        }
+      }
+    } catch (e) {}
+    showToast?.(`Supplier "${supplierName}" berhasil dihapus.`, 'info');
+  };
 
   // Helper to format currency numbers
   const formatNum = (num: number) => {
@@ -211,7 +315,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
       let grossMainStoreForDay = 0;
       let totalCostForDay = 0;
 
-      SUPPLIER_COLUMNS.forEach(sup => {
+      activeSupplierColumns.forEach(sup => {
         let supCost = 0;
         for (const st of monthlyStates) {
           if (sup.id === 'cash') {
@@ -258,6 +362,19 @@ const ReceivingSheetModule: React.FC<Props> = ({
               netStore = Math.max(0, grossStore - totalDeductionsForDay);
             }
             supCost += netStore;
+          } else if (sup.isCustom) {
+            // Check custom supplier ledgers:
+            const custItems = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
+            if (Array.isArray(custItems) && custItems.length > 0) {
+              supCost += custItems.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
+            }
+            const keyItems = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
+            if (Array.isArray(keyItems) && keyItems.length > 0) {
+              supCost += keyItems.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
+            }
+            if (st.expenses?.[dateStr] && (st.expenses[dateStr] as any)[sup.id]) {
+              supCost += Number((st.expenses[dateStr] as any)[sup.id]) || 0;
+            }
           } else {
             const ledgerList = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
             if (Array.isArray(ledgerList) && ledgerList.length > 0) {
@@ -295,7 +412,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
     }
 
     return rows;
-  }, [selectedYear, selectedMonth, daysInMonth, monthlyStates]);
+  }, [selectedYear, selectedMonth, daysInMonth, monthlyStates, activeSupplierColumns]);
 
   // Monthly totals
   const monthlyTotals = useMemo(() => {
@@ -303,14 +420,14 @@ const ReceivingSheetModule: React.FC<Props> = ({
     let totalCost = 0;
     const supplierTotals: Record<string, number> = {};
 
-    SUPPLIER_COLUMNS.forEach(sup => {
+    activeSupplierColumns.forEach(sup => {
       supplierTotals[sup.id] = 0;
     });
 
     dailyRows.forEach(row => {
       totalRevenue += row.revenue;
       totalCost += row.totalCost;
-      SUPPLIER_COLUMNS.forEach(sup => {
+      activeSupplierColumns.forEach(sup => {
         supplierTotals[sup.id] += (row.supplierCosts[sup.id] || 0);
       });
     });
@@ -323,7 +440,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
       supplierTotals,
       overallPct
     };
-  }, [dailyRows]);
+  }, [dailyRows, activeSupplierColumns]);
 
   // Auto ledger sums for Guest Supplies and Non Commodity
   const autoLedgerSums = useMemo(() => {
@@ -380,11 +497,14 @@ const ReceivingSheetModule: React.FC<Props> = ({
   const actualBelanja = monthlyTotals.totalCost;
   // 3. Ending Inventory
   const endingInventory = Number(savedCogsData.endingInventory) || 0;
-  // 4. RND (Research & Development)
+  // 4. Group Pengurangan Inventory: RND, WRONG MAKER, & MARKETING (KOL)
   const rnd = Number(savedCogsData.rnd) || 0;
+  const wrongMaker = Number(savedCogsData.wrongMaker) || 0;
+  const marketingKol = Number(savedCogsData.marketingKol) || 0;
+  const totalRndGroup = rnd + wrongMaker + marketingKol;
 
-  // Formula: TOTAL BARANG TERSEDIA = BEGIN INVENTORY + ACTUAL BELANJA - RND
-  const totalBarangTersedia = beginningInventory + actualBelanja - rnd;
+  // Formula: TOTAL BARANG TERSEDIA = BEGIN INVENTORY + ACTUAL BELANJA - (RND + WRONG MAKER + MARKETING KOL)
+  const totalBarangTersedia = beginningInventory + actualBelanja - totalRndGroup;
 
   // Formula: COGS ACTUAL = TOTAL BARANG TERSEDIA - ENDING INVENTORY
   const cogsActual = totalBarangTersedia - endingInventory;
@@ -427,6 +547,8 @@ const ReceivingSheetModule: React.FC<Props> = ({
   const [inputBeginInv, setInputBeginInv] = useState<number>(0);
   const [inputEndingInv, setInputEndingInv] = useState<number>(0);
   const [inputRnd, setInputRnd] = useState<number>(0);
+  const [inputWrongMaker, setInputWrongMaker] = useState<number>(0);
+  const [inputMarketingKol, setInputMarketingKol] = useState<number>(0);
 
   const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
   const [inputActualGuestSupplies, setInputActualGuestSupplies] = useState<number>(0);
@@ -439,10 +561,12 @@ const ReceivingSheetModule: React.FC<Props> = ({
     setInputBeginInv(beginningInventory);
     setInputEndingInv(endingInventory);
     setInputRnd(rnd);
+    setInputWrongMaker(wrongMaker);
+    setInputMarketingKol(marketingKol);
     setShowInventoryModal(true);
   };
 
-  // Save Inventory & RND
+  // Save Inventory & Pengurangan (RND, Wrong Maker, Marketing KOL)
   const handleSaveInventory = () => {
     if (!onUpdate) return;
     const rev = monthlyTotals.totalRevenue;
@@ -457,7 +581,9 @@ const ReceivingSheetModule: React.FC<Props> = ({
         beginningInventory: inputBeginInv,
         endingInventory: inputEndingInv,
         closingInventoryPercent: calcPercent,
-        rnd: inputRnd
+        rnd: inputRnd,
+        wrongMaker: inputWrongMaker,
+        marketingKol: inputMarketingKol
       };
       return next;
     });
@@ -467,10 +593,13 @@ const ReceivingSheetModule: React.FC<Props> = ({
         localStorage.setItem(`COGS_CLOSING_INV_PERCENT_${monthKey}`, String(calcPercent));
         localStorage.setItem(`COGS_CLOSING_INV_${monthKey}`, String(inputEndingInv));
         localStorage.setItem(`COGS_OPENING_INV_${monthKey}`, String(inputBeginInv));
+        localStorage.setItem(`COGS_RND_${monthKey}`, String(inputRnd));
+        localStorage.setItem(`COGS_WRONG_MAKER_${monthKey}`, String(inputWrongMaker));
+        localStorage.setItem(`COGS_MARKETING_KOL_${monthKey}`, String(inputMarketingKol));
       }
     } catch (e) {}
 
-    showToast?.(`Data Inventory berhasil disimpan! Persentase Closing Inventory COGS diperbarui menjadi ${calcPercent}%.`, "success");
+    showToast?.(`Data Inventory, R&D, Wrong Maker, & Marketing (KOL) berhasil disimpan! Persentase Closing Inventory COGS diperbarui menjadi ${calcPercent}%.`, "success");
     setShowInventoryModal(false);
   };
 
@@ -522,13 +651,18 @@ const ReceivingSheetModule: React.FC<Props> = ({
       };
     }[] = [];
 
-    SUPPLIER_COLUMNS.forEach(sup => {
+    activeSupplierColumns.forEach(sup => {
       const list: LedgerItem[] = [];
       for (const st of monthlyStates) {
         if (sup.id === 'cash') {
           const c1 = st.dailyCashLedger?.[dateStr] as LedgerItem[];
           if (Array.isArray(c1)) list.push(...c1);
           const c2 = st.dailyCommodityLedger?.[dateStr] as LedgerItem[];
+          if (Array.isArray(c2)) list.push(...c2);
+        } else if (sup.isCustom) {
+          const c1 = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
+          if (Array.isArray(c1)) list.push(...c1);
+          const c2 = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
           if (Array.isArray(c2)) list.push(...c2);
         } else {
           const l = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
@@ -576,7 +710,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
     });
 
     return result;
-  }, [viewingDayRow, monthlyStates]);
+  }, [viewingDayRow, monthlyStates, activeSupplierColumns]);
 
   // Export Table to Excel
   const handleExportExcel = async () => {
@@ -594,7 +728,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
       worksheet.addRow([]); // Blank row
 
       // Header row
-      const headers = ['TANGGAL', 'REVENUE', '%', 'COST', ...SUPPLIER_COLUMNS.map(s => s.label)];
+      const headers = ['TANGGAL', 'REVENUE', '%', 'COST', ...activeSupplierColumns.map(s => s.label)];
       const headerRow = worksheet.addRow(headers);
       
       // Style Header
@@ -621,7 +755,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
           row.revenue || '',
           row.revenue > 0 ? (row.costPct / 100) : 0,
           row.totalCost || '',
-          ...SUPPLIER_COLUMNS.map(s => row.supplierCosts[s.id] || '')
+          ...activeSupplierColumns.map(s => row.supplierCosts[s.id] || '')
         ];
         const r = worksheet.addRow(rowVals);
 
@@ -663,7 +797,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
         monthlyTotals.totalRevenue,
         monthlyTotals.totalRevenue > 0 ? (monthlyTotals.overallPct / 100) : 0,
         monthlyTotals.totalCost,
-        ...SUPPLIER_COLUMNS.map(s => monthlyTotals.supplierTotals[s.id] || 0)
+        ...activeSupplierColumns.map(s => monthlyTotals.supplierTotals[s.id] || 0)
       ];
       const totRow = worksheet.addRow(totalVals);
 
@@ -715,8 +849,11 @@ const ReceivingSheetModule: React.FC<Props> = ({
       const invData = [
         ['BEGIN INVENTORY', beginningInventory, 'Nilai Persediaan Awal (+)'],
         ['BELANJA (ACTUAL)', actualBelanja, 'Total Belanja Supplier MTD (+)'],
-        ['RND (RESEARCH & DEV)', rnd, 'Pengeluaran Trial & Research (-)'],
-        ['TOTAL BARANG TERSEDIA', totalBarangTersedia, 'Begin Inventory + Belanja - RND (=)'],
+        ['RND (RESEARCH & DEV)', rnd, 'Pengeluaran Trial & Research (-) [Grup Pengurangan]'],
+        ['WRONG MAKER', wrongMaker, 'Kesalahan Pembuatan & Remake (-) [Grup Pengurangan]'],
+        ['MARKETING (KOL)', marketingKol, 'Promosi Influencer & Endorsement (-) [Grup Pengurangan]'],
+        ['SUBTOTAL PENGURANGAN (RND+WM+KOL)', totalRndGroup, 'Total Grup Pengurangan Inventory (-)'],
+        ['TOTAL BARANG TERSEDIA', totalBarangTersedia, 'Begin Inventory + Belanja - (RND + WM + KOL) (=)'],
         ['ENDING INVENTORY', endingInventory, 'Nilai Persediaan Akhir (-)'],
         ['COGS ACTUAL', cogsActual, 'Total Barang Tersedia - Ending Inventory (=)'],
         ['% COGS ACTUAL / REVENUE', monthlyTotals.totalRevenue > 0 ? (cogsActual / monthlyTotals.totalRevenue) : 0, 'Rasio COGS Actual terhadap Total Revenue']
@@ -724,15 +861,18 @@ const ReceivingSheetModule: React.FC<Props> = ({
 
       invData.forEach((d, idx) => {
         const r = worksheet.addRow(d);
-        const isHighlight = idx === 3 || idx === 5;
+        const isHighlight = idx === 6 || idx === 8;
+        const isDeductionSubtotal = idx === 5;
         r.eachCell((cell, colIdx) => {
-          cell.font = { name: 'Arial', size: 9, bold: isHighlight };
+          cell.font = { name: 'Arial', size: 9, bold: isHighlight || isDeductionSubtotal };
           cell.border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } }, left: { style: 'thin', color: { argb: 'FFCBD5E1' } }, bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } }, right: { style: 'thin', color: { argb: 'FFCBD5E1' } } };
           if (isHighlight) {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx === 5 ? 'FFFDE047' : 'FFFEEFA3' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx === 8 ? 'FFFDE047' : 'FFFEEFA3' } };
+          } else if (isDeductionSubtotal) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } };
           }
           if (colIdx === 2) {
-            if (idx === 6) {
+            if (idx === 9) {
               cell.numFmt = '0.00%';
               cell.alignment = { horizontal: 'right' };
             } else {
@@ -894,6 +1034,15 @@ const ReceivingSheetModule: React.FC<Props> = ({
           </div>
 
           <button
+            onClick={() => setShowAddSupplierModal(true)}
+            className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg active:scale-95 flex items-center gap-2 border border-indigo-400/30"
+            title="Tambah Supplier Baru"
+          >
+            <i className="fas fa-plus"></i>
+            Tambah Supplier
+          </button>
+
+          <button
             onClick={handleExportExcel}
             className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg active:scale-95 flex items-center gap-2 border border-emerald-400/30"
           >
@@ -1001,9 +1150,26 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 <th className="p-3 text-center bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider border border-amber-300/40 w-32">
                   COST
                 </th>
-                {SUPPLIER_COLUMNS.map(sup => (
+                {activeSupplierColumns.map(sup => (
                   <th key={sup.id} className="p-3 text-center bg-slate-800 text-slate-200 font-black text-[11px] uppercase tracking-wider border border-white/10">
-                    {sup.label}
+                    <div className="flex items-center justify-center gap-1">
+                      <span>{sup.label}</span>
+                      {sup.isCustom && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Hapus supplier kustom "${sup.label}"?`)) {
+                              handleDeleteCustomSupplier(sup.id, sup.label);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-rose-400 transition-colors ml-1 p-0.5"
+                          title="Hapus Supplier Kustom Ini"
+                        >
+                          <i className="fas fa-times text-[10px]"></i>
+                        </button>
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -1040,7 +1206,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
                   </td>
 
                   {/* SUPPLIER COLUMNS */}
-                  {SUPPLIER_COLUMNS.map(sup => {
+                  {activeSupplierColumns.map(sup => {
                     const val = row.supplierCosts[sup.id] || 0;
                     const isMainStore = sup.id === 'mainStore';
                     const hasDeductions = isMainStore && row.totalDeductions > 0;
@@ -1086,7 +1252,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 <td className="p-3 text-right font-mono text-xs font-black border border-amber-300">
                   {monthlyTotals.totalCost.toLocaleString('en-US')}
                 </td>
-                {SUPPLIER_COLUMNS.map(sup => (
+                {activeSupplierColumns.map(sup => (
                   <td key={sup.id} className="p-3 text-right font-mono text-xs font-black border border-amber-300">
                     {monthlyTotals.supplierTotals[sup.id] > 0
                       ? monthlyTotals.supplierTotals[sup.id].toLocaleString('en-US')
@@ -1144,7 +1310,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
             className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-500/20 active:scale-95 flex items-center gap-2 self-start md:self-auto border border-amber-300/40"
           >
             <i className="fas fa-pen-to-square"></i>
-            Input / Edit Inventory & RND
+            Input Inventory, RND & Pengurangan
           </button>
         </div>
 
@@ -1159,7 +1325,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 RUMUS TOTAL BARANG TERSEDIA
               </span>
               <span className="text-xs font-mono font-bold text-blue-300">
-                BEGIN INVENTORY (+) BELANJA (-) RND = TOTAL BARANG TERSEDIA
+                BEGIN INVENTORY (+) BELANJA (-) (RND + WRONG MAKER + MARKETING KOL) = TOTAL BARANG TERSEDIA
               </span>
             </div>
           </div>
@@ -1235,10 +1401,26 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 </td>
               </tr>
 
-              {/* 3. RND */}
-              <tr className="hover:bg-white/5 transition-colors">
-                <td className="p-3 text-xs font-bold text-white flex items-center gap-2">
-                  <i className="fas fa-flask text-purple-400"></i> RND (RESEARCH & DEVELOPMENT)
+              {/* 3. GRUP PENGURANGAN: R&D, WRONG MAKER & MARKETING (KOL) */}
+              <tr className="bg-purple-950/40 border-t-2 border-purple-500/40">
+                <td colSpan={4} className="p-2.5 px-3 bg-purple-900/30 text-purple-200 text-xs font-black uppercase tracking-wider">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="flex items-center gap-2">
+                      <i className="fas fa-layer-group text-purple-400"></i>
+                      GRUP PENGURANGAN INVENTORY (R&D, WRONG MAKER & MARKETING KOL)
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
+                      Subtotal Pengurangan: -Rp {totalRndGroup.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+
+              {/* 3a. RND */}
+              <tr className="hover:bg-white/5 transition-colors bg-purple-950/10">
+                <td className="p-3 pl-7 text-xs font-bold text-white flex items-center gap-2">
+                  <i className="fas fa-flask text-purple-400"></i>
+                  <span>RND (RESEARCH & DEVELOPMENT)</span>
                 </td>
                 <td className="p-3 text-right font-mono text-sm font-black text-purple-300">
                   Rp {rnd.toLocaleString('id-ID')}
@@ -1250,6 +1432,63 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 </td>
                 <td className="p-3 text-xs text-slate-400">
                   Pengeluaran barang untuk uji coba resep / Research & Development.
+                </td>
+              </tr>
+
+              {/* 3b. WRONG MAKER */}
+              <tr className="hover:bg-white/5 transition-colors bg-purple-950/10">
+                <td className="p-3 pl-7 text-xs font-bold text-white flex items-center gap-2">
+                  <i className="fas fa-triangle-exclamation text-amber-400"></i>
+                  <span>WRONG MAKER</span>
+                </td>
+                <td className="p-3 text-right font-mono text-sm font-black text-amber-300">
+                  Rp {wrongMaker.toLocaleString('id-ID')}
+                </td>
+                <td className="p-3 text-center">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    (-) KURANG
+                  </span>
+                </td>
+                <td className="p-3 text-xs text-slate-400">
+                  Pengeluaran barang akibat salah pembuatan / remake produk & kesalahan produksi dapur/bar.
+                </td>
+              </tr>
+
+              {/* 3c. MARKETING (KOL) */}
+              <tr className="hover:bg-white/5 transition-colors bg-purple-950/10">
+                <td className="p-3 pl-7 text-xs font-bold text-white flex items-center gap-2">
+                  <i className="fas fa-bullhorn text-pink-400"></i>
+                  <span>MARKETING (KOL)</span>
+                </td>
+                <td className="p-3 text-right font-mono text-sm font-black text-pink-300">
+                  Rp {marketingKol.toLocaleString('id-ID')}
+                </td>
+                <td className="p-3 text-center">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    (-) KURANG
+                  </span>
+                </td>
+                <td className="p-3 text-xs text-slate-400">
+                  Pengeluaran barang untuk promosi endorsement, influencer & Key Opinion Leader (KOL).
+                </td>
+              </tr>
+
+              {/* 3d. SUBTOTAL PENGURANGAN */}
+              <tr className="bg-purple-900/25 border-b border-purple-500/30">
+                <td className="p-2.5 pl-7 text-xs font-bold text-purple-300 flex items-center gap-2">
+                  <i className="fas fa-calculator text-purple-400"></i>
+                  <span>SUBTOTAL PENGURANGAN (RND + WRONG MAKER + KOL)</span>
+                </td>
+                <td className="p-2.5 text-right font-mono text-sm font-black text-purple-200">
+                  -Rp {totalRndGroup.toLocaleString('id-ID')}
+                </td>
+                <td className="p-2.5 text-center">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-purple-500/30 text-purple-200 border border-purple-400/40">
+                    (-) DEDUCT
+                  </span>
+                </td>
+                <td className="p-2.5 text-xs text-purple-300/80 font-mono">
+                  = RND + Wrong Maker + Marketing (KOL)
                 </td>
               </tr>
 
@@ -1267,7 +1506,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
                   </span>
                 </td>
                 <td className="p-3.5 text-xs font-bold text-amber-200 font-mono">
-                  = Begin Inventory + Belanja - RND
+                  = Begin Inventory + Belanja - (RND + Wrong Maker + Marketing KOL)
                 </td>
               </tr>
 
@@ -1727,15 +1966,15 @@ const ReceivingSheetModule: React.FC<Props> = ({
       {/* ========================================================================= */}
       {showInventoryModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-lg w-full space-y-6 shadow-2xl">
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-lg w-full space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div>
                 <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
                   <i className="fas fa-boxes-stacked text-amber-400"></i>
-                  Input Inventory & R&D ({MONTH_NAMES[selectedMonth]} {selectedYear})
+                  Input Inventory & Pengurangan ({MONTH_NAMES[selectedMonth]} {selectedYear})
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Masukkan nilai Begin Inventory, Ending Inventory, dan Pengeluaran R&D.
+                  Masukkan nilai Begin Inventory, Ending Inventory, serta grup pengurangan (R&D, Wrong Maker, Marketing KOL).
                 </p>
               </div>
               <button
@@ -1773,18 +2012,68 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* RND */}
-              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
-                <label className="text-xs font-black uppercase text-purple-300 tracking-wider flex items-center gap-1.5">
-                  <i className="fas fa-flask"></i> R&D / Research & Development (Rp)
-                </label>
-                <input
-                  type="number"
-                  placeholder="0"
-                  value={inputRnd === 0 ? '' : inputRnd}
-                  onChange={e => setInputRnd(Number(e.target.value))}
-                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-mono font-bold text-white outline-none focus:ring-2 ring-purple-500"
-                />
+              {/* GRUP PENGURANGAN: RND, WRONG MAKER & MARKETING (KOL) */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-purple-500/30 space-y-3.5">
+                <div className="flex items-center justify-between pb-2 border-b border-purple-500/20">
+                  <span className="text-xs font-black uppercase text-purple-300 tracking-wider flex items-center gap-1.5">
+                    <i className="fas fa-layer-group text-purple-400"></i>
+                    Grup Pengurangan Inventory (-)
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
+                    Subtotal: -Rp {(inputRnd + inputWrongMaker + inputMarketingKol).toLocaleString('id-ID')}
+                  </span>
+                </div>
+
+                {/* 1. RND */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                    <i className="fas fa-flask text-purple-400"></i> 1. R&D / Research & Development (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={inputRnd === 0 ? '' : inputRnd}
+                    onChange={e => setInputRnd(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-sm font-mono font-bold text-white outline-none focus:ring-2 ring-purple-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Pengeluaran bahan uji coba resep dan menu baru.
+                  </p>
+                </div>
+
+                {/* 2. WRONG MAKER */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                    <i className="fas fa-triangle-exclamation text-amber-400"></i> 2. Wrong Maker (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={inputWrongMaker === 0 ? '' : inputWrongMaker}
+                    onChange={e => setInputWrongMaker(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-sm font-mono font-bold text-white outline-none focus:ring-2 ring-amber-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Pengeluaran bahan akibat kesalahan resep, salah order, atau remake.
+                  </p>
+                </div>
+
+                {/* 3. MARKETING (KOL) */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                    <i className="fas fa-bullhorn text-pink-400"></i> 3. Marketing (KOL / Influencer) (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={inputMarketingKol === 0 ? '' : inputMarketingKol}
+                    onChange={e => setInputMarketingKol(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-sm font-mono font-bold text-white outline-none focus:ring-2 ring-pink-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Pengeluaran bahan makanan/minuman untuk promosi endorsement & influencer.
+                  </p>
+                </div>
               </div>
 
               {/* ENDING INVENTORY */}
@@ -1806,22 +2095,28 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 />
                 <p className="text-[10px] text-slate-400 flex items-center gap-1">
                   <i className="fas fa-link text-emerald-400"></i>
-                  <span>Nilai Ending Inventory ini akan otomatis sinkron dan mempengaruhi <strong className="text-white">Persentase Closing Inventory pada Fitur COGS Outlet</strong> ({monthlyTotals.totalRevenue > 0 ? ((inputEndingInv / monthlyTotals.totalRevenue) * 100).toFixed(2) : '0.00'}% terhadap revenue MTD).</span>
+                  <span>Nilai Ending Inventory ini otomatis sinkron ke <strong className="text-white">Persentase Closing Inventory pada Fitur COGS Outlet</strong> ({monthlyTotals.totalRevenue > 0 ? ((inputEndingInv / monthlyTotals.totalRevenue) * 100).toFixed(2) : '0.00'}% terhadap revenue MTD).</span>
                 </p>
               </div>
 
               {/* LIVE SIMULATION BOX */}
               <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2 text-xs">
                 <div className="flex justify-between items-center text-slate-300">
+                  <span>Subtotal Pengurangan (RND + WM + KOL):</span>
+                  <span className="font-mono font-bold text-purple-300">
+                    -Rp {(inputRnd + inputWrongMaker + inputMarketingKol).toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
                   <span>Total Barang Tersedia:</span>
                   <span className="font-mono font-bold text-amber-300">
-                    Rp {(inputBeginInv + actualBelanja - inputRnd).toLocaleString('id-ID')}
+                    Rp {(inputBeginInv + actualBelanja - (inputRnd + inputWrongMaker + inputMarketingKol)).toLocaleString('id-ID')}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-slate-300 border-t border-amber-500/20 pt-2">
                   <span className="font-black text-amber-200 uppercase">Kalkulasi COGS Actual:</span>
                   <span className="font-mono font-black text-amber-300 text-sm">
-                    Rp {(inputBeginInv + actualBelanja - inputRnd - inputEndingInv).toLocaleString('id-ID')}
+                    Rp {(inputBeginInv + actualBelanja - (inputRnd + inputWrongMaker + inputMarketingKol) - inputEndingInv).toLocaleString('id-ID')}
                   </span>
                 </div>
               </div>
@@ -1839,7 +2134,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 className="px-6 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2"
               >
                 <i className="fas fa-save"></i>
-                Simpan Inventory
+                Simpan Inventory & Pengurangan
               </button>
             </div>
           </div>
@@ -2013,6 +2308,170 @@ const ReceivingSheetModule: React.FC<Props> = ({
               >
                 <i className="fas fa-save"></i>
                 Simpan Realisasi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: TAMBAH SUPPLIER BARU (ADD NEW SUPPLIER) */}
+      {/* ========================================================================= */}
+      {showAddSupplierModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-lg w-full space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar animate-fade-in">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <i className="fas fa-truck-fast text-indigo-400"></i>
+                  Tambah Supplier Baru
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Daftarkan mitra supplier / rekanan baru. Kolom baru akan otomatis terbit di Receiving Sheet.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddSupplierModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* NAMA SUPPLIER */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
+                <label className="text-xs font-black uppercase text-indigo-300 tracking-wider flex items-center gap-1.5">
+                  <i className="fas fa-building"></i> Nama Supplier / Vendor <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: PT Sumber Berkah / Surya Mandiri"
+                  value={newSupplierName}
+                  onChange={e => setNewSupplierName(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-500"
+                />
+              </div>
+
+              {/* KATEGORI SUPPLIER */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1.5">
+                <label className="text-xs font-black uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                  <i className="fas fa-tags text-indigo-400"></i> Kategori Produk / Supplier
+                </label>
+                <select
+                  value={newSupplierCategory}
+                  onChange={e => setNewSupplierCategory(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-500 cursor-pointer"
+                >
+                  <option value="Mitra Bahan Makanan">Mitra Bahan Makanan (Food & Ingredients)</option>
+                  <option value="Mitra Bahan Minuman">Mitra Bahan Minuman (Beverage & Bar)</option>
+                  <option value="Sayur & Buah Segar">Sayur & Buah Segar</option>
+                  <option value="Daging & Seafood">Daging, Ayam & Seafood</option>
+                  <option value="Kemasan & Disposable">Kemasan & Packaging</option>
+                  <option value="Peralatan & Chemical">Peralatan & Chemical</option>
+                  <option value="Supplier Pasar & Cash">Supplier Pasar & Cash</option>
+                  <option value="Vendor Operasional">Vendor Operasional Lainnya</option>
+                </select>
+              </div>
+
+              {/* KONTAK & TELEPON */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    PIC / Kontak Person
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Nama PIC (opsional)"
+                    value={newSupplierContact}
+                    onChange={e => setNewSupplierContact(e.target.value)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500"
+                  />
+                </div>
+                <div className="p-3 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    No. Telp / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="08123xxx (opsional)"
+                    value={newSupplierPhone}
+                    onChange={e => setNewSupplierPhone(e.target.value)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* CATATAN / TERMS */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-1">
+                <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                  Catatan / Syarat Pembayaran (Opsional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: TOP 14 Hari, Pengiriman Tiap Selasa & Jumat"
+                  value={newSupplierNotes}
+                  onChange={e => setNewSupplierNotes(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:ring-2 ring-indigo-500"
+                />
+              </div>
+
+              {/* DAFTAR SUPPLIER KUSTOM YANG SUDAH DITAMBAHKAN */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-white/5 space-y-2">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  Daftar Supplier Kustom Tambahan ({activeSupplierColumns.filter(s => s.isCustom).length})
+                </span>
+                {activeSupplierColumns.filter(s => s.isCustom).length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">
+                    Belum ada supplier kustom tambahan. Default 10 rekanan supplier aktif.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                    {activeSupplierColumns.filter(s => s.isCustom).map(cs => (
+                      <div key={cs.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-900 border border-white/5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-truck text-indigo-400 text-xs"></i>
+                          <span className="font-bold text-white">{cs.label}</span>
+                          {cs.category && (
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              {cs.category}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Hapus supplier "${cs.label}"?`)) {
+                              handleDeleteCustomSupplier(cs.id, cs.label);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-rose-400 transition-colors p-1"
+                          title="Hapus Supplier"
+                        >
+                          <i className="fas fa-trash-alt text-xs"></i>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setShowAddSupplierModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs uppercase hover:bg-slate-700 transition-all"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={handleAddSupplier}
+                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2 active:scale-95"
+              >
+                <i className="fas fa-plus"></i>
+                Tambah Supplier Baru
               </button>
             </div>
           </div>

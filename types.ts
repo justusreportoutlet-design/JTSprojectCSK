@@ -921,6 +921,8 @@ export interface MonthlyCogsData {
   endingInventory?: number; // Closing Inventory Nominal (Rp)
   closingInventoryPercent?: number; // Closing Inventory % of MTD Revenue (e.g. 10.00%)
   rnd?: number; // Research & Development expenditure
+  wrongMaker?: number; // Wrong Maker / Remake expenditure
+  marketingKol?: number; // Marketing (KOL / Endorsement) expenditure
   actualGuestSupplies?: number; // Actual Guest Supplies spending
   actualSpoiled?: number; // Actual Spoiled spending
   actualWaste?: number; // Actual Waste spending
@@ -1045,4 +1047,17 @@ export interface AppState {
   dailyStrategy?: Record<string, DailyStrategyRecord>;
   dailyVoidBills?: Record<string, VoidBillRecord[]>;
   voidBills?: VoidBillRecord[];
+  customSuppliers?: CustomSupplier[];
+  dailyCustomSupplierLedgers?: Record<string, Record<string, LedgerItem[]>>;
+}
+
+export interface CustomSupplier {
+  id: string;
+  name: string;
+  key?: string;
+  category?: string;
+  contactPerson?: string;
+  phone?: string;
+  notes?: string;
+  createdAt?: string;
 }

@@ -1907,7 +1907,9 @@ ${sc.isRecorded ? `- Realisasi Total Sales : Rp.${sc.actualTotal.toLocaleString(
 
   // Save Settings to State & Local Storage
   const handleSaveConfig = () => {
+    const currentSaved = (data.monthlyCogsData || {})[monthKey] || {};
     const updatedMonthlyCogs: MonthlyCogsData = {
+      ...currentSaved,
       targetBudgetPercent,
       targetCogsPercent: targetBudgetPercent,
       beginningInventory: openingInventory,
