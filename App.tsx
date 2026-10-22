@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ModuleType, AppState, User, SyncStatus, Outlet, Notification, LeaveRecord } from './types';
-import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames } from './constants';
+import { ModuleType, AppState, User, SyncStatus, Outlet, Notification, LeaveRecord, CustomSupplier } from './types';
+import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames, getStoredCustomSuppliers } from './constants';
 import { fetchUserData, saveGlobalData, saveOutletData, startRealtimeListener, startNotificationListener, isQuotaExceeded, resetQuotaExceeded, fetchAllOutletsData, startAllOutletsListener, testConnection } from './services/cloudService';
 import { safeStorage, safeClipboard, safeWindow } from './lib/safeStorage';
 import { toLocalDateStr } from './lib/dateUtils';
@@ -176,7 +176,8 @@ const App: React.FC = () => {
     dailyCPA: INITIAL_STATE.dailyCPA || {},
     dailyGSI: INITIAL_STATE.dailyGSI || {},
     guestComplaints: INITIAL_STATE.guestComplaints || [],
-    affiliateHistory: INITIAL_STATE.affiliateHistory || []
+    affiliateHistory: INITIAL_STATE.affiliateHistory || [],
+    customSuppliers: getStoredCustomSuppliers()
   });
   const [outletMonthlyData, setOutletMonthlyDataState] = useState<Record<string, any>>({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -217,6 +218,19 @@ const App: React.FC = () => {
     };
     window.addEventListener('openOutletControl', handleOpenOutletControl);
     return () => window.removeEventListener('openOutletControl', handleOpenOutletControl);
+  }, []);
+
+  useEffect(() => {
+    const handleSupChange = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setGlobalDataState(prev => ({
+          ...prev,
+          customSuppliers: e.detail
+        }));
+      }
+    };
+    window.addEventListener('appCustomSuppliersChanged', handleSupChange);
+    return () => window.removeEventListener('appCustomSuppliersChanged', handleSupChange);
   }, []);
 
   const lastSyncedGlobal = useRef<Record<string, string>>({});
@@ -580,6 +594,15 @@ const App: React.FC = () => {
       ...((monthBase.sales && monthBase.sales.dailyRecording) || {})
     };
 
+    let activeCustomSuppliers: CustomSupplier[] = [];
+    if (globalData.customSuppliers && globalData.customSuppliers.length > 0) {
+      activeCustomSuppliers = globalData.customSuppliers;
+    } else if (monthBase.customSuppliers && monthBase.customSuppliers.length > 0) {
+      activeCustomSuppliers = monthBase.customSuppliers;
+    } else {
+      activeCustomSuppliers = getStoredCustomSuppliers();
+    }
+
     return {
       ...monthBase,
       dailyRecording: activeDailyRec,
@@ -591,13 +614,14 @@ const App: React.FC = () => {
       leaveRecords,
       logisticItems,
       manpowerData: mergedManpowerData,
+      customSuppliers: activeCustomSuppliers,
       dailyOvertime: { ...(monthBase.dailyOvertime || {}), ...mergedDailyOvertime },
       logisticBeginningStocks: mergedBeginningStocks,
       dailyLogisticRecords: mergedDailyRecords,
       peminjamanRecords: mergedPeminjaman,
       logisticPeriodPrices: mergedPeriodPrices
     } as AppState;
-  }, [outletMonthlyData, filters.month, globalData.manpowerData]);
+  }, [outletMonthlyData, filters.month, globalData.manpowerData, globalData.customSuppliers]);
 
   const dataRef = useRef<AppState>(currentData);
   useEffect(() => {

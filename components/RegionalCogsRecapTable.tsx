@@ -31,6 +31,8 @@ export interface OutletCogsRowData {
   openingInventory: number;
   closingInventory: number;
   closingInvPercent: number;
+  endingInventory: number;
+  endingInvPercent: number;
   totalBelanja: number;
   percentFoodCost: number;
   targetBudgetPercent: number;
@@ -264,27 +266,25 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       // 6. Opening Inventory
       const openingInventory = Number(cogsData.beginningInventory) || 0;
 
-      // 7. Closing Inventory (Ending Inventory di Receiving Sheet mempengaruhi persentase closing inventory)
-      let closingInvPercent = cogsData.closingInventoryPercent !== undefined 
+      // 7. Closing Inventory (Target & Simulasi Manual Berdasarkan Forecast Revenue)
+      const closingInvPercent = cogsData.closingInventoryPercent !== undefined 
         ? Number(cogsData.closingInventoryPercent) 
         : 10.0;
-      let closingInventory = Math.round(totalProjectedFullMonth * (closingInvPercent / 100));
+      const closingInventory = Math.round(totalProjectedFullMonth * (closingInvPercent / 100));
 
-      if (cogsData.endingInventory !== undefined && Number(cogsData.endingInventory) > 0) {
-        closingInventory = Number(cogsData.endingInventory);
-        if (totalProjectedFullMonth > 0) {
-          closingInvPercent = Number(((closingInventory / totalProjectedFullMonth) * 100).toFixed(2));
-        } else if (actualRevenueMTD > 0) {
-          closingInvPercent = Number(((closingInventory / actualRevenueMTD) * 100).toFixed(2));
-        }
-      }
+      // 8. Ending Inventory (Aktual Fisik Stok Opname dari Receiving Sheet)
+      const hasEndingInv = cogsData.endingInventory !== undefined && Number(cogsData.endingInventory) > 0;
+      const endingInventory = hasEndingInv ? Number(cogsData.endingInventory) : 0;
+      const endingInvPercent = totalProjectedFullMonth > 0 
+        ? Number(((endingInventory / totalProjectedFullMonth) * 100).toFixed(2)) 
+        : (actualRevenueMTD > 0 ? Number(((endingInventory / actualRevenueMTD) * 100).toFixed(2)) : 0);
 
       // 9. % Food Cost
       const percentFoodCost = actualRevenueMTD > 0
         ? (totalBelanja / actualRevenueMTD) * 100
         : (totalProjectedFullMonth > 0 ? (totalBelanja / totalProjectedFullMonth) * 100 : 0);
 
-      // 10. Budget Belanja
+      // 10. Budget Belanja (Berdasarkan Target Set Belanja % × Forecast Revenue)
       const targetBudgetPercent = cogsData.targetBudgetPercent !== undefined 
         ? Number(cogsData.targetBudgetPercent) 
         : 43.0;
@@ -294,13 +294,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       // 11. Sisa Budget Belanja
       const sisaBudgetBelanja = budgetBelanja - totalBelanja;
 
-      // 12. % COGS Actual
-      const effectiveCogs = Math.max(0, openingInventory + totalBelanja - closingInventory);
+      // 12. COGS Aktual (Realisasi Belanja MTD & Ending Inventory Fisik)
+      const effectiveEndingForActual = hasEndingInv ? endingInventory : closingInventory;
+      const effectiveCogs = Math.max(0, openingInventory + totalBelanja - effectiveEndingForActual);
       const percentCogsActual = actualRevenueMTD > 0
         ? (effectiveCogs / actualRevenueMTD) * 100
         : (totalProjectedFullMonth > 0 ? (effectiveCogs / totalProjectedFullMonth) * 100 : 0);
 
-      // Projected COGS for reference
+      // 13. COGS Proyeksi (Berdasarkan Set Belanja % dan Closing Inventory % Manual Sesuai Forecast Revenue)
       const effectiveProjectedCogs = Math.max(0, openingInventory + budgetBelanja - closingInventory);
       const projectedCogsPercent = totalProjectedFullMonth > 0
         ? (effectiveProjectedCogs / totalProjectedFullMonth) * 100
@@ -317,6 +318,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         openingInventory,
         closingInventory,
         closingInvPercent,
+        endingInventory,
+        endingInvPercent,
         totalBelanja,
         percentFoodCost,
         targetBudgetPercent,
@@ -374,10 +377,12 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       acc.totalProjectedFullMonth += r.totalProjectedFullMonth;
       acc.openingInventory += r.openingInventory;
       acc.closingInventory += r.closingInventory;
+      acc.endingInventory += r.endingInventory;
       acc.totalBelanja += r.totalBelanja;
       acc.budgetBelanja += r.budgetBelanja;
       acc.sisaBudgetBelanja += r.sisaBudgetBelanja;
       acc.effectiveCogs += r.effectiveCogs;
+      acc.effectiveProjectedCogs += r.effectiveProjectedCogs;
       return acc;
     }, {
       mtdBudgetRevenue: 0,
@@ -386,10 +391,12 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       totalProjectedFullMonth: 0,
       openingInventory: 0,
       closingInventory: 0,
+      endingInventory: 0,
       totalBelanja: 0,
       budgetBelanja: 0,
       sisaBudgetBelanja: 0,
-      effectiveCogs: 0
+      effectiveCogs: 0,
+      effectiveProjectedCogs: 0
     });
 
     const percentFoodCost = totals.actualRevenue > 0
@@ -400,10 +407,15 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       ? (totals.effectiveCogs / totals.actualRevenue) * 100
       : (totals.totalProjectedFullMonth > 0 ? (totals.effectiveCogs / totals.totalProjectedFullMonth) * 100 : 0);
 
+    const projectedCogsPercent = totals.totalProjectedFullMonth > 0
+      ? (totals.effectiveProjectedCogs / totals.totalProjectedFullMonth) * 100
+      : 0;
+
     return {
       ...totals,
       percentFoodCost,
-      percentCogsActual
+      percentCogsActual,
+      projectedCogsPercent
     };
   };
 
@@ -416,7 +428,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       const worksheet = workbook.addWorksheet('COGS & Forecast Control');
 
       // Title
-      worksheet.mergeCells('A1:L1');
+      worksheet.mergeCells('A1:N1');
       worksheet.getCell('A1').value = `LAPORAN REGIONAL COGS & FORECAST REVENUE CONTROL - ${monthName.toUpperCase()} ${selectedYear}`;
       worksheet.getCell('A1').font = { size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
       worksheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
@@ -431,12 +443,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         'FORECAST SISA HARI',
         'TOTAL PROJECTED FULL MONTH',
         'OPENING INVENTORY',
-        'CLOSING INVENTORY',
+        'CLOSING INVENTORY (TARGET)',
+        'ENDING INVENTORY (AKTUAL)',
         'TOTAL BELANJA',
         '%FOOD COST',
         'BUDGET BELANJA',
         'SISA BUDGET BELANJA',
-        '% COGS ACTUAL'
+        '% COGS AKTUAL',
+        '% COGS PROYEKSI'
       ];
 
       const headerRow = worksheet.addRow(headers);
@@ -456,8 +470,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       // Rows by area
       areaGroups.forEach(([areaName, rows]) => {
         // Area Header
-        const areaHeaderRow = worksheet.addRow([`AREA: ${areaName}`, '', '', '', '', '', '', '', '', '', '', '']);
-        worksheet.mergeCells(`A${areaHeaderRow.number}:L${areaHeaderRow.number}`);
+        const areaHeaderRow = worksheet.addRow([`AREA: ${areaName}`, '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        worksheet.mergeCells(`A${areaHeaderRow.number}:N${areaHeaderRow.number}`);
         areaHeaderRow.getCell(1).font = { bold: true, color: { argb: 'FF818CF8' }, size: 10 };
         areaHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E1B4B' } };
         areaHeaderRow.height = 22;
@@ -471,27 +485,31 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
             r.totalProjectedFullMonth,
             r.openingInventory,
             r.closingInventory,
+            r.endingInventory,
             r.totalBelanja,
             r.percentFoodCost / 100,
             r.budgetBelanja,
             r.sisaBudgetBelanja,
-            r.percentCogsActual / 100
+            r.percentCogsActual / 100,
+            r.projectedCogsPercent / 100
           ]);
 
           row.height = 20;
           row.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
-          for (let col = 2; col <= 8; col++) {
+          for (let col = 2; col <= 9; col++) {
             row.getCell(col).numFmt = '#,##0';
             row.getCell(col).alignment = { vertical: 'middle', horizontal: 'right' };
           }
-          row.getCell(9).numFmt = '0.00%';
-          row.getCell(9).alignment = { vertical: 'middle', horizontal: 'center' };
-          row.getCell(10).numFmt = '#,##0';
-          row.getCell(10).alignment = { vertical: 'middle', horizontal: 'right' };
+          row.getCell(10).numFmt = '0.00%';
+          row.getCell(10).alignment = { vertical: 'middle', horizontal: 'center' };
           row.getCell(11).numFmt = '#,##0';
           row.getCell(11).alignment = { vertical: 'middle', horizontal: 'right' };
-          row.getCell(12).numFmt = '0.00%';
-          row.getCell(12).alignment = { vertical: 'middle', horizontal: 'center' };
+          row.getCell(12).numFmt = '#,##0';
+          row.getCell(12).alignment = { vertical: 'middle', horizontal: 'right' };
+          row.getCell(13).numFmt = '0.00%';
+          row.getCell(13).alignment = { vertical: 'middle', horizontal: 'center' };
+          row.getCell(14).numFmt = '0.00%';
+          row.getCell(14).alignment = { vertical: 'middle', horizontal: 'center' };
         });
 
         // Area Subtotal
@@ -504,21 +522,23 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           sub.totalProjectedFullMonth,
           sub.openingInventory,
           sub.closingInventory,
+          sub.endingInventory,
           sub.totalBelanja,
           sub.percentFoodCost / 100,
           sub.budgetBelanja,
           sub.sisaBudgetBelanja,
-          sub.percentCogsActual / 100
+          sub.percentCogsActual / 100,
+          sub.projectedCogsPercent / 100
         ]);
 
         subRow.height = 22;
         subRow.eachCell((cell, colNum) => {
           cell.font = { bold: true, color: { argb: 'FFC7D2FE' } };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF312E81' } };
-          if (colNum >= 2 && colNum !== 9 && colNum !== 12) {
+          if (colNum >= 2 && colNum !== 10 && colNum !== 13 && colNum !== 14) {
             cell.numFmt = '#,##0';
             cell.alignment = { vertical: 'middle', horizontal: 'right' };
-          } else if (colNum === 9 || colNum === 12) {
+          } else if (colNum === 10 || colNum === 13 || colNum === 14) {
             cell.numFmt = '0.00%';
             cell.alignment = { vertical: 'middle', horizontal: 'center' };
           }
@@ -534,21 +554,23 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         grandTotals.totalProjectedFullMonth,
         grandTotals.openingInventory,
         grandTotals.closingInventory,
+        grandTotals.endingInventory,
         grandTotals.totalBelanja,
         grandTotals.percentFoodCost / 100,
         grandTotals.budgetBelanja,
         grandTotals.sisaBudgetBelanja,
-        grandTotals.percentCogsActual / 100
+        grandTotals.percentCogsActual / 100,
+        grandTotals.projectedCogsPercent / 100
       ]);
 
       grandRow.height = 26;
       grandRow.eachCell((cell, colNum) => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF020617' } };
-        if (colNum >= 2 && colNum !== 9 && colNum !== 12) {
+        if (colNum >= 2 && colNum !== 10 && colNum !== 13 && colNum !== 14) {
           cell.numFmt = '#,##0';
           cell.alignment = { vertical: 'middle', horizontal: 'right' };
-        } else if (colNum === 9 || colNum === 12) {
+        } else if (colNum === 10 || colNum === 13 || colNum === 14) {
           cell.numFmt = '0.00%';
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
         }
@@ -561,12 +583,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       worksheet.getColumn(4).width = 18;
       worksheet.getColumn(5).width = 22;
       worksheet.getColumn(6).width = 18;
-      worksheet.getColumn(7).width = 18;
-      worksheet.getColumn(8).width = 18;
-      worksheet.getColumn(9).width = 14;
-      worksheet.getColumn(10).width = 18;
+      worksheet.getColumn(7).width = 20;
+      worksheet.getColumn(8).width = 20;
+      worksheet.getColumn(9).width = 18;
+      worksheet.getColumn(10).width = 14;
       worksheet.getColumn(11).width = 18;
-      worksheet.getColumn(12).width = 14;
+      worksheet.getColumn(12).width = 18;
+      worksheet.getColumn(13).width = 16;
+      worksheet.getColumn(14).width = 16;
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -591,17 +615,23 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         msg += `  - Actual Rev: Rp ${formatIDR(r.actualRevenue)}\n`;
         msg += `  - Forecast Sisa Hari: Rp ${formatIDR(r.forecastSisaHari)}\n`;
         msg += `  - Projected Full Month: Rp ${formatIDR(r.totalProjectedFullMonth)}\n`;
+        msg += `  - Closing Inv (Target): Rp ${formatIDR(r.closingInventory)} (${r.closingInvPercent.toFixed(1)}%)\n`;
+        msg += `  - Ending Inv (Aktual): Rp ${formatIDR(r.endingInventory)} (${r.endingInvPercent.toFixed(1)}%)\n`;
         msg += `  - Belanja MTD: Rp ${formatIDR(r.totalBelanja)} (${formatPct(r.percentFoodCost)})\n`;
         msg += `  - Budget Belanja: Rp ${formatIDR(r.budgetBelanja)} (Sisa: Rp ${formatIDR(r.sisaBudgetBelanja)})\n`;
-        msg += `  - % COGS Actual: ${formatPct(r.percentCogsActual)}\n\n`;
+        msg += `  - % COGS Aktual: ${formatPct(r.percentCogsActual)}\n`;
+        msg += `  - % COGS Proyeksi: ${formatPct(r.projectedCogsPercent)}\n\n`;
       });
 
       const sub = computeTotals(rows);
       msg += `*SUBTOTAL ${areaName}:*\n`;
       msg += `  - Actual Rev: Rp ${formatIDR(sub.actualRevenue)} / Projected: Rp ${formatIDR(sub.totalProjectedFullMonth)}\n`;
+      msg += `  - Closing Inv (Target): Rp ${formatIDR(sub.closingInventory)}\n`;
+      msg += `  - Ending Inv (Aktual): Rp ${formatIDR(sub.endingInventory)}\n`;
       msg += `  - Belanja: Rp ${formatIDR(sub.totalBelanja)} (${formatPct(sub.percentFoodCost)})\n`;
       msg += `  - Budget Belanja: Rp ${formatIDR(sub.budgetBelanja)} (Sisa: Rp ${formatIDR(sub.sisaBudgetBelanja)})\n`;
-      msg += `  - % COGS Actual: ${formatPct(sub.percentCogsActual)}\n`;
+      msg += `  - % COGS Aktual: ${formatPct(sub.percentCogsActual)}\n`;
+      msg += `  - % COGS Proyeksi: ${formatPct(sub.projectedCogsPercent)}\n`;
       msg += `------------------------------------\n\n`;
     });
 
@@ -610,11 +640,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
     msg += `• Actual Rev: Rp ${formatIDR(grandTotals.actualRevenue)}\n`;
     msg += `• Forecast Sisa Hari: Rp ${formatIDR(grandTotals.forecastSisaHari)}\n`;
     msg += `• Projected Full Month: Rp ${formatIDR(grandTotals.totalProjectedFullMonth)}\n`;
+    msg += `• Closing Inv (Target): Rp ${formatIDR(grandTotals.closingInventory)}\n`;
+    msg += `• Ending Inv (Aktual): Rp ${formatIDR(grandTotals.endingInventory)}\n`;
     msg += `• Total Belanja: Rp ${formatIDR(grandTotals.totalBelanja)}\n`;
     msg += `• % Food Cost: ${formatPct(grandTotals.percentFoodCost)}\n`;
     msg += `• Budget Belanja: Rp ${formatIDR(grandTotals.budgetBelanja)}\n`;
     msg += `• Sisa Budget Belanja: Rp ${formatIDR(grandTotals.sisaBudgetBelanja)}\n`;
-    msg += `• % COGS Actual: ${formatPct(grandTotals.percentCogsActual)}\n\n`;
+    msg += `• % COGS Aktual: ${formatPct(grandTotals.percentCogsActual)}\n`;
+    msg += `• % COGS Proyeksi: ${formatPct(grandTotals.projectedCogsPercent)}\n\n`;
     msg += `_Generated from Regional Performance Management_`;
 
     navigator.clipboard.writeText(msg).then(() => {
@@ -685,18 +718,18 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       </div>
 
       {/* Top Summary KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">MTD Budget Rev</span>
-          <p className="text-sm lg:text-base font-black text-amber-400 mt-1 truncate">
+          <p className="text-sm font-black text-amber-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.mtdBudgetRevenue)}
           </p>
           <span className="text-[8px] text-slate-500 mt-0.5">Target Bulan Ini</span>
         </div>
 
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Actual Revenue</span>
-          <p className="text-sm lg:text-base font-black text-emerald-400 mt-1 truncate">
+          <p className="text-sm font-black text-emerald-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.actualRevenue)}
           </p>
           <span className="text-[8px] text-emerald-500 font-bold mt-0.5">
@@ -704,17 +737,17 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           </span>
         </div>
 
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Total Projected Rev</span>
-          <p className="text-sm lg:text-base font-black text-indigo-400 mt-1 truncate">
+          <p className="text-sm font-black text-indigo-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.totalProjectedFullMonth)}
           </p>
           <span className="text-[8px] text-slate-500 mt-0.5">Actual + Forecast Sisa</span>
         </div>
 
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Total Belanja MTD</span>
-          <p className="text-sm lg:text-base font-black text-orange-400 mt-1 truncate">
+          <p className="text-sm font-black text-orange-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.totalBelanja)}
           </p>
           <span className="text-[8px] text-orange-400 font-bold mt-0.5">
@@ -722,9 +755,9 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           </span>
         </div>
 
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Budget Belanja</span>
-          <p className="text-sm lg:text-base font-black text-cyan-400 mt-1 truncate">
+          <p className="text-sm font-black text-cyan-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.budgetBelanja)}
           </p>
           <span className={`text-[8px] font-bold mt-0.5 ${grandTotals.sisaBudgetBelanja >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -732,21 +765,33 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           </span>
         </div>
 
-        <div className="glass-card bg-slate-950/60 p-3.5 border-white/5 rounded-2xl flex flex-col justify-between">
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between border-l-2 border-emerald-500/40">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">% COGS Actual</span>
-          <p className={`text-sm lg:text-base font-black mt-1 ${grandTotals.percentCogsActual <= 43 ? 'text-emerald-400' : grandTotals.percentCogsActual <= 45 ? 'text-amber-400' : 'text-rose-400'}`}>
+          <p className={`text-sm font-black mt-1 ${grandTotals.percentCogsActual <= 43 ? 'text-emerald-400' : grandTotals.percentCogsActual <= 45 ? 'text-amber-400' : 'text-rose-400'}`}>
             {formatPct(grandTotals.percentCogsActual)}
           </p>
-          <span className="text-[8px] text-slate-500 mt-0.5">HPP Realisasi Regional</span>
+          <span className="text-[8px] text-slate-500 mt-0.5 truncate" title={`Ending Inv: Rp ${formatIDR(grandTotals.endingInventory)}`}>
+            End Inv: Rp {formatIDR(grandTotals.endingInventory)}
+          </span>
+        </div>
+
+        <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between border-l-2 border-purple-500/40">
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">% COGS Proyeksi</span>
+          <p className={`text-sm font-black mt-1 ${grandTotals.projectedCogsPercent <= 43 ? 'text-indigo-400' : grandTotals.projectedCogsPercent <= 45 ? 'text-amber-400' : 'text-rose-400'}`}>
+            {formatPct(grandTotals.projectedCogsPercent)}
+          </p>
+          <span className="text-[8px] text-slate-500 mt-0.5 truncate" title={`Closing Inv: Rp ${formatIDR(grandTotals.closingInventory)}`}>
+            Close Inv: Rp {formatIDR(grandTotals.closingInventory)}
+          </span>
         </div>
       </div>
 
       {/* Main Single Consolidated Table */}
       <div className="overflow-x-auto glass-card bg-slate-950/80 border border-white/10 rounded-2xl shadow-2xl">
-        <table className="w-full text-left border-collapse min-w-[1300px]">
+        <table className="w-full text-left border-collapse min-w-[1450px]">
           <thead>
             <tr className="bg-slate-900/95 text-[10px] font-black uppercase tracking-widest border-b border-white/10 text-slate-300 sticky top-0 z-10 backdrop-blur-md">
-              <th className="p-3 border-r border-white/10 text-left w-56 sticky left-0 bg-slate-900/95 z-20">
+              <th className="p-3 border-r border-white/10 text-left w-52 sticky left-0 bg-slate-900/95 z-20">
                 1. NAMA OUTLET
               </th>
               <th className="p-3 border-r border-white/10 text-right bg-amber-950/20 text-amber-300">
@@ -764,23 +809,29 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
               <th className="p-3 border-r border-white/10 text-right text-slate-400">
                 6. OPENING INVENTORY
               </th>
-              <th className="p-3 border-r border-white/10 text-right text-slate-400">
-                7. CLOSING INVENTORY
-              </th>
-              <th className="p-3 border-r border-white/10 text-right bg-orange-950/20 text-orange-300">
-                8. TOTAL BELANJA
-              </th>
-              <th className="p-3 border-r border-white/10 text-center bg-orange-950/30 text-orange-300 w-28">
-                9. %FOOD COST
-              </th>
               <th className="p-3 border-r border-white/10 text-right bg-indigo-950/20 text-indigo-300">
-                10. BUDGET BELANJA
+                7. CLOSING INVENTORY (TARGET)
               </th>
               <th className="p-3 border-r border-white/10 text-right bg-emerald-950/20 text-emerald-300">
-                11. SISA BUDGET BELANJA
+                8. ENDING INVENTORY (AKTUAL)
               </th>
-              <th className="p-3 text-center bg-purple-950/30 text-purple-200 w-32">
-                12. % COGS ACTUAL
+              <th className="p-3 border-r border-white/10 text-right bg-orange-950/20 text-orange-300">
+                9. TOTAL BELANJA
+              </th>
+              <th className="p-3 border-r border-white/10 text-center bg-orange-950/30 text-orange-300 w-24">
+                10. %FOOD COST
+              </th>
+              <th className="p-3 border-r border-white/10 text-right bg-indigo-950/20 text-indigo-300">
+                11. BUDGET BELANJA
+              </th>
+              <th className="p-3 border-r border-white/10 text-right bg-emerald-950/20 text-emerald-300">
+                12. SISA BUDGET BELANJA
+              </th>
+              <th className="p-3 border-r border-white/10 text-center bg-emerald-950/30 text-emerald-200 w-28">
+                13. % COGS AKTUAL
+              </th>
+              <th className="p-3 text-center bg-purple-950/30 text-purple-200 w-28">
+                14. % COGS PROYEKSI
               </th>
             </tr>
           </thead>
@@ -792,7 +843,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                 <React.Fragment key={areaName}>
                   {/* Area Group Header */}
                   <tr className="bg-slate-900/90 border-t-2 border-indigo-500/40 border-b border-white/10">
-                    <td colSpan={12} className="py-2.5 px-3">
+                    <td colSpan={14} className="py-2.5 px-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-pulse"></span>
@@ -818,9 +869,15 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
                         : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
 
-                    const cogsStatusColor = row.percentCogsActual <= 43 
+                    const cogsActualColor = row.percentCogsActual <= 43 
                       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' 
                       : row.percentCogsActual <= 45 
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' 
+                        : 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+
+                    const cogsProjColor = row.projectedCogsPercent <= 43 
+                      ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' 
+                      : row.projectedCogsPercent <= 45 
                         ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' 
                         : 'bg-rose-500/15 text-rose-300 border-rose-500/30';
 
@@ -867,29 +924,39 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                           Rp {formatIDR(row.openingInventory)}
                         </td>
 
-                        {/* 7. CLOSING INVENTORY */}
-                        <td className="p-3 border-r border-white/10 text-right text-slate-400 font-mono text-[11px]">
+                        {/* 7. CLOSING INVENTORY (TARGET SIMULASI) */}
+                        <td className="p-3 border-r border-white/10 text-right text-slate-300 font-mono text-[11px] bg-indigo-950/5">
                           <div className="flex flex-col items-end">
                             <span>Rp {formatIDR(row.closingInventory)}</span>
-                            <span className="text-[8px] text-slate-500 font-normal">
-                              ({row.closingInvPercent.toFixed(1)}%)
+                            <span className="text-[8px] text-indigo-400 font-semibold">
+                              ({row.closingInvPercent.toFixed(1)}% Sim.)
                             </span>
                           </div>
                         </td>
 
-                        {/* 8. TOTAL BELANJA */}
+                        {/* 8. ENDING INVENTORY (AKTUAL FISIK RECEIVING) */}
+                        <td className="p-3 border-r border-white/10 text-right text-slate-300 font-mono text-[11px] bg-emerald-950/5">
+                          <div className="flex flex-col items-end">
+                            <span>Rp {formatIDR(row.endingInventory)}</span>
+                            <span className="text-[8px] text-emerald-400 font-semibold">
+                              {row.endingInventory > 0 ? `(${row.endingInvPercent.toFixed(1)}% Fisik)` : '(Belum Opname)'}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* 9. TOTAL BELANJA */}
                         <td className="p-3 border-r border-white/10 text-right font-black text-orange-400 bg-orange-950/5">
                           Rp {formatIDR(row.totalBelanja)}
                         </td>
 
-                        {/* 9. %FOOD COST */}
+                        {/* 10. %FOOD COST */}
                         <td className="p-3 border-r border-white/10 text-center bg-orange-950/10">
                           <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black border ${fcStatusColor}`}>
                             {formatPct(row.percentFoodCost)}
                           </span>
                         </td>
 
-                        {/* 10. BUDGET BELANJA */}
+                        {/* 11. BUDGET BELANJA */}
                         <td className="p-3 border-r border-white/10 text-right font-medium text-indigo-300 bg-indigo-950/5">
                           <div className="flex flex-col items-end">
                             <span>Rp {formatIDR(row.budgetBelanja)}</span>
@@ -899,25 +966,25 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                           </div>
                         </td>
 
-                        {/* 11. SISA BUDGET BELANJA */}
+                        {/* 12. SISA BUDGET BELANJA */}
                         <td className="p-3 border-r border-white/10 text-right font-black bg-emerald-950/5">
                           <span className={row.sisaBudgetBelanja >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                             Rp {formatIDR(row.sisaBudgetBelanja)}
                           </span>
                         </td>
 
-                        {/* 12. % COGS ACTUAL */}
+                        {/* 13. % COGS AKTUAL */}
+                        <td className="p-3 border-r border-white/10 text-center bg-emerald-950/10">
+                          <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-black border ${cogsActualColor}`}>
+                            {formatPct(row.percentCogsActual)}
+                          </span>
+                        </td>
+
+                        {/* 14. % COGS PROYEKSI */}
                         <td className="p-3 text-center bg-purple-950/10">
-                          <div className="flex flex-col items-center">
-                            <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-black border ${cogsStatusColor}`}>
-                              {formatPct(row.percentCogsActual)}
-                            </span>
-                            {row.projectedCogsPercent > 0 && Math.abs(row.projectedCogsPercent - row.percentCogsActual) > 0.05 && (
-                              <span className="text-[8px] text-slate-500 mt-0.5">
-                                Proj: {formatPct(row.projectedCogsPercent)}
-                              </span>
-                            )}
-                          </div>
+                          <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-black border ${cogsProjColor}`}>
+                            {formatPct(row.projectedCogsPercent)}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -943,8 +1010,11 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                     <td className="p-3 border-r border-white/10 text-right text-slate-300 font-mono text-[11px]">
                       Rp {formatIDR(subtotal.openingInventory)}
                     </td>
-                    <td className="p-3 border-r border-white/10 text-right text-slate-300 font-mono text-[11px]">
+                    <td className="p-3 border-r border-white/10 text-right text-indigo-300 font-mono text-[11px]">
                       Rp {formatIDR(subtotal.closingInventory)}
+                    </td>
+                    <td className="p-3 border-r border-white/10 text-right text-emerald-300 font-mono text-[11px]">
+                      Rp {formatIDR(subtotal.endingInventory)}
                     </td>
                     <td className="p-3 border-r border-white/10 text-right text-orange-400 font-black">
                       Rp {formatIDR(subtotal.totalBelanja)}
@@ -962,9 +1032,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                         Rp {formatIDR(subtotal.sisaBudgetBelanja)}
                       </span>
                     </td>
+                    <td className="p-3 border-r border-white/10 text-center font-black">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-900/60 text-emerald-200 border border-emerald-400/30">
+                        {formatPct(subtotal.percentCogsActual)}
+                      </span>
+                    </td>
                     <td className="p-3 text-center font-black">
                       <span className="px-2.5 py-0.5 rounded-full bg-purple-900/60 text-purple-200 border border-purple-400/30">
-                        {formatPct(subtotal.percentCogsActual)}
+                        {formatPct(subtotal.projectedCogsPercent)}
                       </span>
                     </td>
                   </tr>
@@ -994,8 +1069,11 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
               <td className="p-3.5 border-r border-white/10 text-right text-slate-300 font-mono text-[11px]">
                 Rp {formatIDR(grandTotals.openingInventory)}
               </td>
-              <td className="p-3.5 border-r border-white/10 text-right text-slate-300 font-mono text-[11px]">
+              <td className="p-3.5 border-r border-white/10 text-right text-indigo-300 font-mono text-[11px]">
                 Rp {formatIDR(grandTotals.closingInventory)}
+              </td>
+              <td className="p-3.5 border-r border-white/10 text-right text-emerald-300 font-mono text-[11px]">
+                Rp {formatIDR(grandTotals.endingInventory)}
               </td>
               <td className="p-3.5 border-r border-white/10 text-right text-orange-400 font-black">
                 Rp {formatIDR(grandTotals.totalBelanja)}
@@ -1013,9 +1091,14 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                   Rp {formatIDR(grandTotals.sisaBudgetBelanja)}
                 </span>
               </td>
+              <td className="p-3.5 border-r border-white/10 text-center font-black">
+                <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-black">
+                  {formatPct(grandTotals.percentCogsActual)}
+                </span>
+              </td>
               <td className="p-3.5 text-center font-black">
                 <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-black">
-                  {formatPct(grandTotals.percentCogsActual)}
+                  {formatPct(grandTotals.projectedCogsPercent)}
                 </span>
               </td>
             </tr>

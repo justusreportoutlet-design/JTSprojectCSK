@@ -117,7 +117,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     : (propSelectedOutlet || 'SH THE BARN');
 
   const [activeOutlet, setActiveOutlet] = useState<string>(defaultOutlet);
-  const [moduleTab, setModuleTab] = useState<'INPUT' | 'ALOKASI_BUDGET' | 'MATRIX'>('INPUT');
+  const [moduleTab, setModuleTab] = useState<'INPUT' | 'ALOKASI_BUDGET' | 'MATRIX' | 'DAFTAR_SUPPLIER'>('INPUT');
   const [activeSupplierFilter, setActiveSupplierFilter] = useState<string>('ALL');
   const [matrixSearch, setMatrixSearch] = useState<string>('');
   const [matrixSortBy, setMatrixSortBy] = useState<'spend_desc' | 'spend_asc' | 'qty_desc' | 'name_asc'>('spend_desc');
@@ -227,6 +227,26 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     return [...SUPPLIERS_LIST, ...customDefs];
   }, [customSuppliersList]);
 
+  // Robust helper to get items for any supplier (core or custom) for a date
+  const getSupplierItemsForDate = (st: any, sup: SupplierDef, dateStr: string): LedgerItem[] => {
+    if (!st) return [];
+    const directList = (st as any)[sup.ledgerKey]?.[dateStr];
+    if (Array.isArray(directList) && directList.length > 0) return directList;
+    const customRecord = st.dailyCustomSupplierLedgers?.[sup.key]?.[dateStr] || 
+                         st.dailyCustomSupplierLedgers?.[sup.expenseKey]?.[dateStr];
+    if (Array.isArray(customRecord) && customRecord.length > 0) return customRecord;
+    return [];
+  };
+
+  const getSupplierLedgerMap = (st: any, sup: SupplierDef): Record<string, LedgerItem[]> => {
+    if (!st) return {};
+    const direct = (st as any)[sup.ledgerKey] as Record<string, LedgerItem[]> | undefined;
+    const custom = (st.dailyCustomSupplierLedgers?.[sup.key] || st.dailyCustomSupplierLedgers?.[sup.expenseKey]) as Record<string, LedgerItem[]> | undefined;
+    if (direct && Object.keys(direct).length > 0) return direct;
+    if (custom && Object.keys(custom).length > 0) return custom;
+    return direct || custom || {};
+  };
+
   React.useEffect(() => {
     const saved = safeStorage.getItem(budgetStorageKey);
     setCustomProcurementBudget(saved ? parseFloat(saved) || 0 : 0);
@@ -299,18 +319,17 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     if (filterStartDay > daysInMonth) setFilterStartDay(1);
   }, [daysInMonth, filterEndDay, filterStartDay]);
 
-  // Current day supplier items across all suppliers
+  // Current day supplier items across all suppliers (core & custom)
   const currentDayAllSupplierItems = useMemo(() => {
     const list: { supplier: SupplierDef; item: LedgerItem }[] = [];
-    SUPPLIERS_LIST.forEach(sup => {
-      const ledger = (data as any)[sup.ledgerKey] as Record<string, LedgerItem[]> | undefined;
-      const items = (ledger && ledger[inputDate]) || [];
+    dynamicSuppliersList.forEach(sup => {
+      const items = getSupplierItemsForDate(data, sup, inputDate);
       items.forEach(it => {
         list.push({ supplier: sup, item: it });
       });
     });
     return list;
-  }, [data, inputDate]);
+  }, [data, inputDate, dynamicSuppliersList]);
 
   const currentDayTotal = useMemo(() => {
     return currentDayAllSupplierItems.reduce((acc, { item }) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
@@ -353,8 +372,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
     const processedTx = new Set<string>();
     targetStates.forEach(st => {
-      SUPPLIERS_LIST.forEach(sup => {
-        const ledger = (st as any)[sup.ledgerKey] as Record<string, LedgerItem[]> | undefined;
+      dynamicSuppliersList.forEach(sup => {
+        const ledger = getSupplierLedgerMap(st, sup);
         if (!ledger) return;
         Object.entries(ledger).forEach(([dStr, items]) => {
           if (!dStr.startsWith(String(selectedYear))) return;
@@ -374,7 +393,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     });
 
     return stats;
-  }, [data, allMonthlyData, activeOutlet, isRegionalView, selectedYear]);
+  }, [data, allMonthlyData, activeOutlet, isRegionalView, selectedYear, dynamicSuppliersList]);
 
   const handleAddSupplierItem = (e: React.FormEvent) => {
     e.preventDefault();
@@ -394,7 +413,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       return;
     }
 
-    const targetSup = SUPPLIERS_LIST.find(s => s.key === inputSupplier) || SUPPLIERS_LIST[0];
+    const targetSup = dynamicSuppliersList.find(s => s.key === inputSupplier) || dynamicSuppliersList[0];
     const newItem: LedgerItem = {
       id: 'sup-' + targetSup.key + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       name: inputName.trim(),
@@ -406,18 +425,17 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
     onUpdate((prev: AppState) => {
       const supLedgerKey = targetSup.ledgerKey;
-      const currentSupLedger = ((prev as any)[supLedgerKey] || {}) as Record<string, LedgerItem[]>;
+      const currentSupLedger = (getSupplierLedgerMap(prev, targetSup) || {}) as Record<string, LedgerItem[]>;
       const curList = currentSupLedger[inputDate] || [];
       const updatedSupLedger = {
         ...currentSupLedger,
         [inputDate]: [...curList, newItem]
       };
 
-      // Sum all suppliers for this date
+      // Sum all suppliers (core & custom) for this date
       let totalAllSup = 0;
-      SUPPLIERS_LIST.forEach(s => {
-        const ledger = s.key === targetSup.key ? updatedSupLedger : ((prev as any)[s.ledgerKey] || {});
-        const items = ledger[inputDate] || [];
+      dynamicSuppliersList.forEach(s => {
+        const items = s.key === targetSup.key ? updatedSupLedger[inputDate] || [] : getSupplierItemsForDate(prev, s, inputDate);
         totalAllSup += items.reduce((acc: number, it: LedgerItem) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
       });
 
@@ -451,9 +469,17 @@ export const SupplierExpenseModule: React.FC<Props> = ({
         }
       };
 
+      // Also persist to dailyCustomSupplierLedgers for custom suppliers
+      const updatedCustomLedgers = {
+        ...(prev.dailyCustomSupplierLedgers || {}),
+        [targetSup.key]: updatedSupLedger,
+        [targetSup.expenseKey]: updatedSupLedger
+      };
+
       return {
         ...prev,
         [supLedgerKey]: updatedSupLedger,
+        dailyCustomSupplierLedgers: updatedCustomLedgers,
         expenses: updatedExpenses
       };
     });
@@ -468,10 +494,10 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
   const handleDeleteSupplierItem = (supKey: string, itemId: string, itemName: string) => {
     if (!onUpdate) return;
-    const targetSup = SUPPLIERS_LIST.find(s => s.key === supKey) || SUPPLIERS_LIST[0];
+    const targetSup = dynamicSuppliersList.find(s => s.key === supKey) || dynamicSuppliersList[0];
     onUpdate((prev: AppState) => {
       const supLedgerKey = targetSup.ledgerKey;
-      const currentSupLedger = ((prev as any)[supLedgerKey] || {}) as Record<string, LedgerItem[]>;
+      const currentSupLedger = (getSupplierLedgerMap(prev, targetSup) || {}) as Record<string, LedgerItem[]>;
       const curList = currentSupLedger[inputDate] || [];
       const updatedSupLedger = {
         ...currentSupLedger,
@@ -479,9 +505,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       };
 
       let totalAllSup = 0;
-      SUPPLIERS_LIST.forEach(s => {
-        const ledger = s.key === targetSup.key ? updatedSupLedger : ((prev as any)[s.ledgerKey] || {});
-        const items = ledger[inputDate] || [];
+      dynamicSuppliersList.forEach(s => {
+        const items = s.key === targetSup.key ? updatedSupLedger[inputDate] || [] : getSupplierItemsForDate(prev, s, inputDate);
         totalAllSup += items.reduce((acc: number, it: LedgerItem) => acc + ((Number(it.qty) || 0) * (Number(it.price) || 0)), 0);
       });
 
@@ -507,9 +532,16 @@ export const SupplierExpenseModule: React.FC<Props> = ({
         gas: 0
       };
 
+      const updatedCustomLedgers = {
+        ...(prev.dailyCustomSupplierLedgers || {}),
+        [targetSup.key]: updatedSupLedger,
+        [targetSup.expenseKey]: updatedSupLedger
+      };
+
       return {
         ...prev,
         [supLedgerKey]: updatedSupLedger,
+        dailyCustomSupplierLedgers: updatedCustomLedgers,
         expenses: {
           ...(prev.expenses || {}),
           [inputDate]: {
@@ -568,7 +600,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     dailyItemsMap
   } = useMemo(() => {
     const supMap: Record<string, { total: number; count: number; itemsCount: number; totalQty: number }> = {};
-    SUPPLIERS_LIST.forEach(s => {
+    dynamicSuppliersList.forEach(s => {
       supMap[s.key] = { total: 0, count: 0, itemsCount: 0, totalQty: 0 };
     });
 
@@ -589,8 +621,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       const st = getOutletMonthState(outletName, selectedMonth, selectedYear);
       if (!st) return;
 
-      SUPPLIERS_LIST.forEach(sup => {
-        const ledgerRecord = (st as any)[sup.ledgerKey] as Record<string, LedgerItem[]> || {};
+      dynamicSuppliersList.forEach(sup => {
+        const ledgerRecord = getSupplierLedgerMap(st, sup);
         let supSpendForOutlet = 0;
 
         for (let d = 1; d <= daysInMonth; d++) {
@@ -693,7 +725,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     const totalSpend = Object.values(supMap).reduce((acc, s) => acc + s.total, 0);
     const totalQty = itemsList.reduce((acc, it) => acc + it.totalQty, 0);
 
-    SUPPLIERS_LIST.forEach(sup => {
+    dynamicSuppliersList.forEach(sup => {
       const itemsInSup = itemsList.filter(it => it.supplierKey === sup.key);
       supMap[sup.key].itemsCount = itemsInSup.length;
       supMap[sup.key].count = itemsInSup.reduce((acc, it) => acc + it.txCount, 0);
@@ -719,7 +751,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       dailyTxMap,
       dailyItemsMap
     };
-  }, [targetOutlets, selectedMonth, selectedYear, monthPrefix, daysInMonth, filterStartDay, filterEndDay]);
+  }, [targetOutlets, selectedMonth, selectedYear, monthPrefix, daysInMonth, filterStartDay, filterEndDay, dynamicSuppliersList]);
 
   // Calculations for Main Kitchen (MK), Main Store (MS), Cash Supplier, and Procurement Allocation
   const procurementSummary = useMemo(() => {
@@ -792,8 +824,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     const totalProcurementSpend = totalSupplierSpend + mkSpend + msSpend + cashSpend;
     const effectiveBudget = customProcurementBudget > 0 ? customProcurementBudget : totalProcurementSpend;
 
-    // Supplier category details with averages and allocations
-    const supplierDetails = SUPPLIERS_LIST.map(sup => {
+    // Supplier category details with averages and allocations (Core + Custom)
+    const supplierDetails = dynamicSuppliersList.map(sup => {
       const sData = supplierSummaries[sup.key] || { total: 0, itemsCount: 0, count: 0, totalQty: 0 };
       const spend = sData.total;
       const tx = sData.count;
@@ -917,7 +949,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     const lmItems = new Map<string, { name: string; supplierKey: string; qty: number; spend: number }>();
     const maxDayForLm = Math.min(filterEndDay, daysInLastMonth);
 
-    SUPPLIERS_LIST.forEach(s => {
+    dynamicSuppliersList.forEach(s => {
       supLastMap[s.key] = 0;
       supLastQty[s.key] = 0;
     });
@@ -926,8 +958,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       const st = getOutletMonthState(o, lastMonthIdx, lastMonthYear);
       if (!st) return;
 
-      SUPPLIERS_LIST.forEach(sup => {
-        const ledgerRecord = (st as any)[sup.ledgerKey] as Record<string, LedgerItem[]> || {};
+      dynamicSuppliersList.forEach(sup => {
+        const ledgerRecord = getSupplierLedgerMap(st, sup);
         for (let d = filterStartDay; d <= maxDayForLm; d++) {
           const dayStr = String(d).padStart(2, '0');
           const dStr = `${lastMonthPrefix}-${dayStr}`;
@@ -970,7 +1002,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       lastMonthSupplierQuantities: supLastQty,
       lastMonthItemsMap: lmItems
     };
-  }, [targetOutlets, lastMonthIdx, lastMonthYear, lastMonthPrefix, daysInLastMonth, filterStartDay, filterEndDay, allMonthlyData]);
+  }, [targetOutlets, lastMonthIdx, lastMonthYear, lastMonthPrefix, daysInLastMonth, filterStartDay, filterEndDay, allMonthlyData, dynamicSuppliersList]);
 
   // Daily matrix for sidebar
   const dailyMatrix = useMemo(() => {
@@ -979,7 +1011,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
   // Category Variances (Per Supplier Breakdown) for Sidebar
   const categoryVariances = useMemo(() => {
-    return SUPPLIERS_LIST.map(sup => {
+    return dynamicSuppliersList.map(sup => {
       const curSpend = supplierSummaries[sup.key]?.total || 0;
       const prevSpend = lastMonthSupplierSpend[sup.key] || 0;
       return {
@@ -992,7 +1024,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
         qtyUnit: 'unit'
       };
     });
-  }, [supplierSummaries, lastMonthSupplierSpend, lastMonthSupplierQuantities]);
+  }, [supplierSummaries, lastMonthSupplierSpend, lastMonthSupplierQuantities, dynamicSuppliersList]);
 
   // Item-level Variances for Top Items
   const itemVariances = useMemo(() => {
@@ -1055,14 +1087,14 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     return targetOutlets.map(o => getOutletMonthState(o, selectedMonth, selectedYear)).filter(Boolean);
   }, [targetOutlets, selectedMonth, selectedYear, data, allMonthlyData]);
 
-  // Columns for 7 suppliers + optional MK, MS, Cash Supplier
+  // Columns for dynamic suppliers + optional MK, MS, Cash Supplier
   const recapColumns: RecapColumnDef[] = useMemo(() => {
-    const cols: RecapColumnDef[] = SUPPLIERS_LIST.map(sup => ({
+    const cols: RecapColumnDef[] = dynamicSuppliersList.map(sup => ({
       id: sup.key,
       label: sup.label,
       shortLabel: sup.label.toUpperCase(),
       getValue: (st, dStr) => {
-        const list = ((st as any)[sup.ledgerKey]?.[dStr] || []) as LedgerItem[];
+        const list = getSupplierItemsForDate(st, sup, dStr);
         const sum = list.reduce((acc, it) => acc + ((Number(it.qty) || 1) * (Number(it.price) || 0)), 0);
         return sum > 0 ? sum : (Number((st.expenses?.[dStr] as any)?.[sup.expenseKey]) || 0);
       }
@@ -1107,15 +1139,15 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     }
 
     return cols;
-  }, [includeProcurementChannelsInRecap]);
+  }, [includeProcurementChannelsInRecap, dynamicSuppliersList]);
 
   // Detail items callback for day popup in full tanggal table
   const getDetailItemsForDay = (dateStr: string, states: AppState[]): DayDetailItem[] => {
     const list: DayDetailItem[] = [];
     states.forEach(st => {
       const outName = st.outlet || activeOutlet;
-      SUPPLIERS_LIST.forEach(sup => {
-        const items = (((st as any)[sup.ledgerKey]?.[dateStr]) || []) as LedgerItem[];
+      dynamicSuppliersList.forEach(sup => {
+        const items = getSupplierItemsForDate(st, sup, dateStr);
         items.forEach(it => {
           list.push({
             id: it.id,
@@ -1335,8 +1367,8 @@ export const SupplierExpenseModule: React.FC<Props> = ({
   // Copy WhatsApp Summary matching strict user template + Procurement Allocation Breakdown
   const handleCopyWhatsApp = (selectedSupplierKey?: string) => {
     const supsToInclude = selectedSupplierKey && selectedSupplierKey !== 'ALL'
-      ? SUPPLIERS_LIST.filter(s => s.key === selectedSupplierKey)
-      : SUPPLIERS_LIST;
+      ? dynamicSuppliersList.filter(s => s.key === selectedSupplierKey)
+      : dynamicSuppliersList;
 
     const categories = supsToInclude.map(sup => {
       const itemsInSup = allMatrixItems.filter(i => i.supplierKey === sup.key);
@@ -1571,6 +1603,16 @@ export const SupplierExpenseModule: React.FC<Props> = ({
             >
               <i className="fas fa-table"></i> Matrix Rekap & Analisis
             </button>
+            <button
+              onClick={() => setModuleTab('DAFTAR_SUPPLIER')}
+              className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                moduleTab === 'DAFTAR_SUPPLIER'
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <i className="fas fa-address-book"></i> Daftar Supplier ({dynamicSuppliersList.length})
+            </button>
           </div>
 
           {moduleTab === 'INPUT' && (
@@ -1785,12 +1827,12 @@ export const SupplierExpenseModule: React.FC<Props> = ({
 
                   {/* Supplier Pills Selector */}
                   <div className="flex flex-wrap gap-1.5">
-                    {SUPPLIERS_LIST.map(sup => (
+                    {dynamicSuppliersList.map(sup => (
                       <button
                         key={sup.key}
                         type="button"
                         onClick={() => setInputSupplier(sup.key)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
                           inputSupplier === sup.key
                             ? 'bg-rose-600 text-white shadow-md'
                             : 'bg-slate-950 text-slate-400 hover:text-white border border-white/5'
@@ -1806,7 +1848,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
                 {popularItemsForInputSupplier.length > 0 && (
                   <div className="mb-4">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2">
-                      Item Populer Rekanan ({SUPPLIERS_LIST.find(s => s.key === inputSupplier)?.label}):
+                      Item Populer Rekanan ({dynamicSuppliersList.find(s => s.key === inputSupplier)?.label || inputSupplier}):
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {popularItemsForInputSupplier.map(item => (
@@ -1898,7 +1940,7 @@ export const SupplierExpenseModule: React.FC<Props> = ({
                       type="submit"
                       className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg shadow-rose-500/20 active:scale-95 cursor-pointer"
                     >
-                      <i className="fas fa-plus"></i> Tambah Item ({SUPPLIERS_LIST.find(s => s.key === inputSupplier)?.label})
+                      <i className="fas fa-plus"></i> Tambah Item ({dynamicSuppliersList.find(s => s.key === inputSupplier)?.label || inputSupplier})
                     </button>
                   </div>
                 </form>
@@ -3269,6 +3311,283 @@ export const SupplierExpenseModule: React.FC<Props> = ({
       </div>
     </div>
   )}
+
+          {/* TAB 4: DAFTAR SUPPLIER (CORE & CUSTOM SUPPLIERS) */}
+          {moduleTab === 'DAFTAR_SUPPLIER' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* HEADER BANNER */}
+              <div className="glass-card p-6 bg-slate-900/90 border border-rose-500/30 rounded-3xl shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <span className="w-9 h-9 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-base font-black">
+                      <i className="fas fa-address-book"></i>
+                    </span>
+                    <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                      Daftar Master Supplier & Mitra Pengadaan
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Semua supplier yang ditambahkan (dari Outlet Control maupun tombol Tambah Supplier) terdaftar di sini dan langsung aktif di Form Input Belanja & Alokasi Budget.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSupplierModal(true)}
+                    className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg shadow-rose-900/30 cursor-pointer active:scale-95"
+                  >
+                    <i className="fas fa-plus"></i> Tambah Supplier Baru
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('openOutletControl', { detail: { tab: 'SUPPLIER' } }));
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 border border-white/10 cursor-pointer"
+                  >
+                    <i className="fas fa-sliders-h text-rose-400"></i> Outlet Control (Master)
+                  </button>
+                </div>
+              </div>
+
+              {/* SUMMARY STATS BAR */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-white/5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Total Supplier</span>
+                  <span className="text-xl font-black font-mono text-white mt-1 block">
+                    {dynamicSuppliersList.length} Mitra
+                  </span>
+                  <span className="text-[10px] text-slate-500">7 Core + {customSuppliersList.length} Tambahan</span>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-indigo-500/20">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">Mitra Inti (Default)</span>
+                  <span className="text-xl font-black font-mono text-indigo-300 mt-1 block">
+                    {SUPPLIERS_LIST.length} Rekanan
+                  </span>
+                  <span className="text-[10px] text-slate-500">TGIF, Sukanda, Everest, dll</span>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-emerald-500/20">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">Supplier Tambahan</span>
+                  <span className="text-xl font-black font-mono text-emerald-300 mt-1 block">
+                    {customSuppliersList.length} Supplier
+                  </span>
+                  <span className="text-[10px] text-slate-500">Ditambahkan Outlet Control</span>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-rose-500/20">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-rose-400 block">Total Belanja MTD</span>
+                  <span className="text-xl font-black font-mono text-rose-400 mt-1 block truncate">
+                    Rp {totalSupplierSpend.toLocaleString('id-ID')}
+                  </span>
+                  <span className="text-[10px] text-slate-500">{procurementSummary.supplierDetails.reduce((a, b) => a + b.txCount, 0)} Total PO MTD</span>
+                </div>
+              </div>
+
+              {/* SECTION: SUPPLIER TAMBAHAN (CUSTOM SUPPLIERS) */}
+              <div className="glass-card p-6 bg-slate-900/90 border border-emerald-500/30 rounded-3xl shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-black">
+                      <i className="fas fa-truck-fast"></i>
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-white uppercase tracking-wider">
+                        Supplier Tambahan ({customSuppliersList.length})
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Supplier khusus yang ditambahkan user ke sistem.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSupplierModal(true)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white text-xs font-bold transition-all border border-emerald-500/30 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <i className="fas fa-plus"></i> Tambah Supplier Baru
+                  </button>
+                </div>
+
+                {customSuppliersList.length === 0 ? (
+                  <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl bg-slate-950/40 space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center text-xl mx-auto">
+                      <i className="fas fa-truck-loading"></i>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">Belum ada Supplier Tambahan</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Tambahkan nama supplier baru di sini atau melalui Outlet Control (Master Supplier).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddSupplierModal(true)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all inline-flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-900/30"
+                    >
+                      <i className="fas fa-plus"></i> Tambah Supplier Sekarang
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {customSuppliersList.map(sup => {
+                      const spend = supplierSummaries[sup.id]?.total || 0;
+                      const count = supplierSummaries[sup.id]?.count || 0;
+
+                      return (
+                        <div
+                          key={sup.id}
+                          className="p-5 rounded-2xl bg-slate-950/80 border border-emerald-500/20 hover:border-emerald-500/40 transition-all flex flex-col justify-between space-y-4 group"
+                        >
+                          <div>
+                            <div className="flex justify-between items-start gap-2">
+                              <div>
+                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 font-bold text-emerald-300 uppercase">
+                                  {sup.category || 'Mitra Bahan Makanan'}
+                                </span>
+                                <h5 className="text-base font-black text-white mt-2 group-hover:text-emerald-300 transition-colors">
+                                  {sup.name}
+                                </h5>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm(`Yakin ingin menghapus supplier "${sup.name}"?`)) {
+                                    handleDeleteCustomSupplier(sup.id, sup.name);
+                                  }
+                                }}
+                                className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 flex items-center justify-center transition-all cursor-pointer text-xs"
+                                title="Hapus Supplier"
+                              >
+                                <i className="fas fa-trash-alt"></i>
+                              </button>
+                            </div>
+
+                            <div className="mt-3 space-y-1 text-xs text-slate-400">
+                              {sup.contactPerson && (
+                                <div className="flex items-center gap-2">
+                                  <i className="fas fa-user text-[10px] text-slate-500 w-3.5"></i>
+                                  <span>PIC: <strong className="text-slate-200">{sup.contactPerson}</strong></span>
+                                </div>
+                              )}
+                              {sup.phone && (
+                                <div className="flex items-center gap-2">
+                                  <i className="fas fa-phone text-[10px] text-emerald-400 w-3.5"></i>
+                                  <a
+                                    href={`https://wa.me/${sup.phone.replace(/[^0-9]/g, '')}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-emerald-400 hover:underline font-mono"
+                                  >
+                                    {sup.phone}
+                                  </a>
+                                </div>
+                              )}
+                              {sup.notes && (
+                                <div className="flex items-start gap-2 pt-1 text-[11px] text-slate-500">
+                                  <i className="fas fa-sticky-note text-[10px] text-slate-600 w-3.5 mt-0.5"></i>
+                                  <span className="italic">{sup.notes}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-white/5 flex flex-col gap-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-400">Total Belanja MTD:</span>
+                              <span className="font-mono font-black text-emerald-400">
+                                Rp {spend.toLocaleString('id-ID')} ({count} PO)
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInputSupplier(sup.id);
+                                setModuleTab('INPUT');
+                                showToast?.(`Pilih supplier "${sup.name}" untuk input belanja.`, 'info');
+                              }}
+                              className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer border border-emerald-500/30"
+                            >
+                              <i className="fas fa-plus"></i> Input Belanja Supplier Ini
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION: 7 REKANAN MITRA INTI (CORE PARTNERS) */}
+              <div className="glass-card p-6 bg-slate-900/90 border border-white/10 rounded-3xl shadow-xl space-y-4">
+                <div className="border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-black">
+                      <i className="fas fa-handshake"></i>
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-white uppercase tracking-wider">
+                        7 Rekanan Supplier Inti (Default Core)
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Mitra pengadaan strategis utama seluruh outlet.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+                  {SUPPLIERS_LIST.map(sup => {
+                    const spend = supplierSummaries[sup.key]?.total || 0;
+                    const count = supplierSummaries[sup.key]?.count || 0;
+                    const share = totalSupplierSpend > 0 ? (spend / totalSupplierSpend) * 100 : 0;
+
+                    return (
+                      <div
+                        key={sup.key}
+                        className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-3"
+                      >
+                        <div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold uppercase">
+                              Core Partner
+                            </span>
+                            <span className="text-xs font-mono font-bold text-slate-400">
+                              {share.toFixed(1)}% Share
+                            </span>
+                          </div>
+                          <h5 className="text-base font-black text-white mt-2 flex items-center gap-2">
+                            <i className={`fas ${sup.icon} text-xs text-rose-400`}></i>
+                            <span>{sup.label}</span>
+                          </h5>
+                          <div className="mt-2 text-xs text-slate-400 flex justify-between items-baseline">
+                            <span>Belanja MTD:</span>
+                            <span className="font-mono font-black text-rose-400">
+                              Rp {spend.toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex justify-between items-baseline">
+                            <span>Total PO:</span>
+                            <span className="font-mono">{count} transaksi</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInputSupplier(sup.key);
+                            setModuleTab('INPUT');
+                            showToast?.(`Pilih supplier "${sup.label}" untuk input belanja.`, 'info');
+                          }}
+                          className="w-full py-1.5 bg-slate-900 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-white/5 hover:border-rose-500/40"
+                        >
+                          <i className="fas fa-edit text-[10px]"></i> Input Belanja
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* MODULE DATE MATRIX & VARIANCE SIDEBAR (RIGHT SIDE) */}
