@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { exportToExcelWithImages } from '../lib/excelExport';
-import { AppState, Outlet, QAData, GoogleReviewData, GSIRow, GuestComplaint } from '../types';
+import { AppState, Outlet, QAData, GoogleReviewData, GSIRow, GuestComplaint, OutletConfig } from '../types';
 import PattyCashOpexRekapanModule from './PattyCashOpexRekapanModule';
 import ThirdPartyGasModule from './ThirdPartyGasModule';
 import LogisticsModule from './LogisticsModule';
@@ -34,8 +34,8 @@ import { RegionalStrategiMenuRecapTable } from './RegionalStrategiMenuRecapTable
 import { RegionalCogsRecapTable } from './RegionalCogsRecapTable';
 import RegionalVoidBillRecapTable from './RegionalVoidBillRecapTable';
 import { buildAggregatedGlobalData } from '../lib/aggregators';
-import { OutletConfig } from '../types';
 import { OUTLETS, REGIONAL_AREAS, getAreaForOutlet, QA_PASSING_SCORES, OT_RATE, INITIAL_STATE, ORDER_SCHEDULES_BY_AREA, getOrderScheduleForOutlet, getStoredOtBudgetSettings, getActiveOutletNames, getActiveRegionalAreas, getActiveOutletConfigs } from '../constants';
+import { buildSingleOutletWaReport, buildAllOutletsWaReport } from '../lib/regionalWaReport';
 import { motion, AnimatePresence } from 'motion/react';
 import ShareActions from './ShareActions';
 import { 
@@ -2838,8 +2838,55 @@ const RegionalManagerModule: React.FC<RMProps> = ({
     selectedYear, 
     globalData: activeData, 
     isPreviewMode, 
-    showToast, 
     onUpdate 
+  };
+
+  // WhatsApp Report State & Helpers
+  const [showWaReportModal, setShowWaReportModal] = useState<boolean>(false);
+  const [waReportMode, setWaReportMode] = useState<'SELECTED' | 'ALL'>('SELECTED');
+  const [waReportTargetOutlet, setWaReportTargetOutlet] = useState<string>('');
+  const [copiedWaSuccess, setCopiedWaSuccess] = useState<boolean>(false);
+
+  const effectiveWaOutlet = useMemo(() => {
+    if (waReportTargetOutlet) return waReportTargetOutlet;
+    if (selectedOutlet && selectedOutlet !== 'ALL') return selectedOutlet;
+    return availableOutlets[0] || 'SH CIPETE';
+  }, [waReportTargetOutlet, selectedOutlet, availableOutlets]);
+
+  const waReportContent = useMemo(() => {
+    if (waReportMode === 'ALL') {
+      return buildAllOutletsWaReport(selectedMonth, selectedYear, allOutletsData, globalData, availableOutlets);
+    }
+    return buildSingleOutletWaReport(effectiveWaOutlet, selectedMonth, selectedYear, allOutletsData, globalData, 1);
+  }, [waReportMode, effectiveWaOutlet, selectedMonth, selectedYear, allOutletsData, globalData, availableOutlets]);
+
+  const handleCopyWaReport = async (mode?: 'SELECTED' | 'ALL', outlet?: string) => {
+    const targetMode = mode || waReportMode;
+    const targetO = outlet || effectiveWaOutlet;
+    const text = targetMode === 'ALL'
+      ? buildAllOutletsWaReport(selectedMonth, selectedYear, allOutletsData, globalData, availableOutlets)
+      : buildSingleOutletWaReport(targetO, selectedMonth, selectedYear, allOutletsData, globalData, 1);
+    
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedWaSuccess(true);
+      setTimeout(() => setCopiedWaSuccess(false), 2500);
+      showToast?.(`Template WA Report ${targetMode === 'ALL' ? 'Seluruh Outlet' : targetO} berhasil disalin! Siap dipaste ke WhatsApp.`, 'success');
+    } catch (err) {
+      console.error('Failed to copy WA report:', err);
+      showToast?.('Gagal menyalin otomatis. Silakan salin manual dari kotak teks.', 'error');
+    }
   };
 
   const scrollTabs = (direction: 'left' | 'right') => {
@@ -2951,6 +2998,17 @@ const RegionalManagerModule: React.FC<RMProps> = ({
              <div className="text-xs font-black text-white px-4 py-2 bg-slate-800 rounded-xl border border-white/5 uppercase">
                 {MONTHS[selectedMonth]} {selectedYear}
              </div>
+             <button
+               onClick={() => {
+                 setWaReportMode(selectedOutlet ? 'SELECTED' : 'ALL');
+                 setWaReportTargetOutlet(selectedOutlet || availableOutlets[0] || 'SH CIPETE');
+                 setShowWaReportModal(true);
+               }}
+               className="p-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-xl transition-all active:scale-95 flex items-center gap-2 text-xs font-black uppercase cursor-pointer"
+               title="Buka Template WA Report"
+             >
+               <i className="fab fa-whatsapp"></i> WA Report
+             </button>
              <button 
                onClick={() => setIsPreviewMode(false)}
                className="p-4 bg-rose-600 hover:bg-rose-500 text-white rounded-xl shadow-xl transition-all active:scale-95 flex items-center gap-2 text-xs font-black uppercase"
@@ -3027,6 +3085,33 @@ const RegionalManagerModule: React.FC<RMProps> = ({
                   >
                     <i className="fas fa-layer-group text-xs"></i>
                     <span>BUTTON ALL OUTLET (REGIONAL)</span>
+                  </button>
+                </div>
+
+                {/* Quick WA Report Buttons */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setWaReportMode('SELECTED');
+                      setWaReportTargetOutlet(selectedOutlet || availableOutlets[0] || 'SH CIPETE');
+                      setShowWaReportModal(true);
+                    }}
+                    className="py-2 px-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/50 hover:text-white shadow-md active:scale-95 cursor-pointer"
+                    title={`Template WA Report ${selectedOutlet || 'Outlet Terpilih'}`}
+                  >
+                    <i className="fab fa-whatsapp text-emerald-400 text-xs"></i>
+                    <span className="truncate">WA {selectedOutlet ? selectedOutlet.replace('SH ', '') : 'OUTLET'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setWaReportMode('ALL');
+                      setShowWaReportModal(true);
+                    }}
+                    className="py-2 px-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border border-teal-500/40 bg-gradient-to-r from-emerald-600/30 to-teal-600/30 text-teal-200 hover:from-emerald-600/50 hover:to-teal-600/50 hover:text-white shadow-md active:scale-95 cursor-pointer"
+                    title="Template WA Report Seluruh Outlet"
+                  >
+                    <i className="fab fa-whatsapp text-teal-300 text-xs"></i>
+                    <span>WA ALL OUTLET</span>
                   </button>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -3187,11 +3272,35 @@ const RegionalManagerModule: React.FC<RMProps> = ({
                     <div className="h-1 w-20 bg-indigo-600 mt-2 rounded-full"></div>
                   </div>
                </div>
-               <div className="flex items-center gap-4">
+               <div className="flex items-center gap-3">
+                  {/* WhatsApp Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setWaReportMode(selectedOutlet ? 'SELECTED' : 'ALL');
+                        setWaReportTargetOutlet(selectedOutlet || availableOutlets[0] || 'SH CIPETE');
+                        setShowWaReportModal(true);
+                      }}
+                      className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 transition-all font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-950/40 active:scale-95 cursor-pointer"
+                      title="Buka Template WA Report"
+                    >
+                      <i className="fab fa-whatsapp text-sm"></i>
+                      <span>Template WA {selectedOutlet ? `(${selectedOutlet.replace('SH ', '')})` : '(All Outlet)'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleCopyWaReport(selectedOutlet ? 'SELECTED' : 'ALL')}
+                      className="flex items-center gap-1.5 px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 transition-all font-black text-[10px] uppercase tracking-wider shadow-lg active:scale-95 cursor-pointer"
+                      title="Salin Cepat Format WhatsApp"
+                    >
+                      <i className="fas fa-copy text-xs"></i>
+                      <span className="hidden sm:inline">Salin WA</span>
+                    </button>
+                  </div>
+
                   {!isPreviewMode && (
                     <button
                       onClick={() => setIsPreviewMode(true)}
-                      className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/40 transition-all font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-900/10"
+                      className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-600/40 transition-all font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-900/10 cursor-pointer"
                     >
                       <i className="fas fa-expand"></i> Preview Full
                     </button>
@@ -3522,6 +3631,143 @@ const RegionalManagerModule: React.FC<RMProps> = ({
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* WHATSAPP REPORT TEMPLATE MODAL */}
+      <AnimatePresence>
+        {showWaReportModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-slate-900 border border-white/10 rounded-[2rem] max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="p-5 sm:p-6 bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border-b border-white/10 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-2xl shadow-lg shadow-emerald-950/50">
+                    <i className="fab fa-whatsapp"></i>
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-black text-white uppercase italic tracking-tight flex items-center gap-2">
+                      <span>Template WA Report Regional</span>
+                      <span className="text-[10px] font-black not-italic bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        {MONTHS[selectedMonth]} {selectedYear}
+                      </span>
+                    </h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                      Format WhatsApp Standard Rekapitulasi Outlet & Seluruh Regional
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowWaReportModal(false)}
+                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all border border-white/10 cursor-pointer"
+                >
+                  <i className="fas fa-times text-sm"></i>
+                </button>
+              </div>
+
+              {/* Scope & Mode Switcher Bar */}
+              <div className="px-5 py-3 sm:px-6 bg-slate-950/60 border-b border-white/5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setWaReportMode('SELECTED')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border ${
+                      waReportMode === 'SELECTED'
+                        ? 'bg-emerald-600 text-white border-emerald-400/50 shadow-lg shadow-emerald-950/40'
+                        : 'bg-slate-800/60 text-slate-400 border-white/5 hover:text-white'
+                    }`}
+                  >
+                    <i className="fas fa-store text-xs"></i>
+                    <span>Outlet Terpilih</span>
+                  </button>
+                  <button
+                    onClick={() => setWaReportMode('ALL')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border ${
+                      waReportMode === 'ALL'
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-teal-400/50 shadow-lg shadow-emerald-950/40'
+                        : 'bg-slate-800/60 text-slate-400 border-white/5 hover:text-white'
+                    }`}
+                  >
+                    <i className="fas fa-layer-group text-xs"></i>
+                    <span>Seluruh Outlet ({availableOutlets.length})</span>
+                  </button>
+                </div>
+
+                {/* Outlet selector if in SELECTED mode */}
+                {waReportMode === 'SELECTED' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Pilih Outlet:</span>
+                    <select
+                      value={effectiveWaOutlet}
+                      onChange={(e) => setWaReportTargetOutlet(e.target.value)}
+                      className="bg-slate-900 border border-emerald-500/40 rounded-xl px-3 py-1.5 text-emerald-300 font-black text-xs outline-none uppercase cursor-pointer"
+                    >
+                      {availableOutlets.map(oName => (
+                        <option key={oName} value={oName} className="bg-slate-900 text-white">
+                          {oName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Text Preview Body */}
+              <div className="flex-1 p-4 sm:p-6 overflow-y-auto max-h-[55vh] bg-slate-950/40">
+                <div className="relative group">
+                  <pre className="font-mono text-xs sm:text-sm text-emerald-100 whitespace-pre-wrap select-all bg-slate-950 border border-white/10 rounded-2xl p-4 sm:p-5 leading-relaxed selection:bg-emerald-500/30 selection:text-white">
+                    {waReportContent}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Modal Footer Controls */}
+              <div className="p-4 sm:p-6 bg-slate-950/80 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] font-bold text-slate-400">
+                  {waReportMode === 'ALL' ? (
+                    <span>Menampilkan rekapitulasi untuk <strong className="text-emerald-400">{availableOutlets.length} outlet aktif</strong></span>
+                  ) : (
+                    <span>Laporan outlet: <strong className="text-emerald-400">{effectiveWaOutlet}</strong></span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <button
+                    onClick={() => handleCopyWaReport()}
+                    className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all shadow-xl cursor-pointer ${
+                      copiedWaSuccess
+                        ? 'bg-emerald-500 text-slate-950 border border-emerald-400'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 shadow-emerald-950/50'
+                    }`}
+                  >
+                    <i className={`fas ${copiedWaSuccess ? 'fa-check' : 'fa-copy'}`}></i>
+                    <span>{copiedWaSuccess ? 'Tersalin ke Clipboard!' : 'Salin Teks WhatsApp'}</span>
+                  </button>
+
+                  <a
+                    href={`https://web.whatsapp.com/send?text=${encodeURIComponent(waReportContent)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 hover:text-white border border-white/10 font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    <i className="fab fa-whatsapp text-emerald-400"></i>
+                    <span>Buka WA Web</span>
+                  </a>
+
+                  <button
+                    onClick={() => setShowWaReportModal(false)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
