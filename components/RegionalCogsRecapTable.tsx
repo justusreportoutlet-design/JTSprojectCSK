@@ -66,6 +66,26 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
   const [activeOutlet, setActiveOutlet] = useState<string>(selectedOutlet || 'ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth();
+  const currentDateNum = new Date().getDate();
+
+  const daysInMonth = useMemo(() => {
+    return new Date(selectedYear, selectedMonth + 1, 0).getDate();
+  }, [selectedYear, selectedMonth]);
+
+  // Cutoff Filter: 'CUSTOM' (rentang tanggal global) atau 'AUTO' (sesuai setting masing-masing outlet)
+  // Default ke 'CUSTOM' dengan filterCutoffDay = daysInMonth (Full Month / Tgl 1 - Akhir Bulan)
+  const [filterCutoffMode, setFilterCutoffMode] = useState<'CUSTOM' | 'AUTO'>('CUSTOM');
+  const [filterStartDay, setFilterStartDay] = useState<number>(1);
+  const [filterCutoffDay, setFilterCutoffDay] = useState<number>(daysInMonth);
+
+  // Sync filterCutoffDay when selectedMonth/selectedYear/daysInMonth change
+  React.useEffect(() => {
+    setFilterCutoffDay(daysInMonth);
+    setFilterStartDay(1);
+  }, [selectedMonth, selectedYear, daysInMonth]);
+
   React.useEffect(() => {
     setActiveArea(selectedArea || 'ALL');
   }, [selectedArea]);
@@ -74,12 +94,19 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
     setActiveOutlet(selectedOutlet || 'ALL');
   }, [selectedOutlet]);
 
-  const daysInMonth = useMemo(() => {
-    return new Date(selectedYear, selectedMonth + 1, 0).getDate();
-  }, [selectedYear, selectedMonth]);
-
   const monthKey = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
   const monthName = MONTH_NAMES[selectedMonth];
+
+  // Active Cutoff Label
+  const activeCutoffLabel = useMemo(() => {
+    if (filterCutoffMode === 'AUTO') {
+      return 'Cutoff Auto Tiap Outlet';
+    }
+    if (filterCutoffDay === daysInMonth && filterStartDay === 1) {
+      return `Tgl 1 - ${daysInMonth} (Full Month / Akhir Bulan)`;
+    }
+    return `Tgl ${filterStartDay} - ${filterCutoffDay}`;
+  }, [filterCutoffMode, filterStartDay, filterCutoffDay, daysInMonth]);
 
   // List of all active outlets
   const activeOutletsList = useMemo(() => {
@@ -94,10 +121,6 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
 
   // Compute 12 metrics per outlet
   const outletsDataList: OutletCogsRowData[] = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth();
-    const currentDateNum = new Date().getDate();
-
     return activeOutletsList.map(outletName => {
       const outletDoc = (allOutletsData && allOutletsData[outletName]) || {};
       const monthDoc = outletDoc[String(selectedMonth)] || outletDoc[selectedMonth] || outletDoc.monthlyData?.[String(selectedMonth)] || {};
@@ -118,12 +141,18 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         mtdBudgetRevenue = Number(monthDoc.budgetRevenue) || 0;
       }
 
-      // Cutoff Day
-      const cutoffDay = cogsData.manualCutoffDay !== undefined
+      // Cutoff Day (Auto vs Custom Filter Tanggal)
+      const outletSavedCutoff = cogsData.manualCutoffDay !== undefined
         ? Math.min(daysInMonth, Math.max(1, Number(cogsData.manualCutoffDay)))
         : (selectedYear === currentYear && selectedMonth === currentMonth
             ? Math.min(daysInMonth, currentDateNum)
             : Math.min(19, daysInMonth));
+
+      const effectiveCutoffDay = filterCutoffMode === 'CUSTOM'
+        ? Math.min(daysInMonth, Math.max(filterStartDay, filterCutoffDay))
+        : outletSavedCutoff;
+
+      const effectiveStartDay = filterCutoffMode === 'CUSTOM' ? Math.max(1, filterStartDay) : 1;
 
       // Calculate Daily Revenue & Daily Belanja up to cutoff
       let actualRevenueMTD = 0;
@@ -224,7 +253,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
 
         totalBelanjaFullMonth += dayBelanja;
 
-        if (d <= cutoffDay) {
+        if (d >= effectiveStartDay && d <= effectiveCutoffDay) {
           actualRevenueMTD += dayRev;
           actualBelanjaMTD += dayBelanja;
           if (dayRev > 0 || isRecorded) {
@@ -236,20 +265,24 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
               pastWeekendCount++;
             }
           }
-        } else {
+        } else if (d > effectiveCutoffDay) {
           if (isWeekday) remainingWeekdayCount++;
           else remainingWeekendCount++;
         }
       }
 
-      // 8. Total Belanja (Diambil dari Total Belanja Fitur Receiving Sheet)
-      let totalBelanja = totalBelanjaFullMonth > 0 ? totalBelanjaFullMonth : actualBelanjaMTD;
+      // 8. Total Belanja (Realisasi Belanja Aktual sesuai periode cutoff/filter tanggal)
+      let totalBelanja = actualBelanjaMTD;
+      if (effectiveCutoffDay >= daysInMonth && totalBelanjaFullMonth > 0 && actualBelanjaMTD === 0) {
+        totalBelanja = totalBelanjaFullMonth;
+      }
       // Check manual override for Belanja if enabled by outlet
       if (cogsData.useManualMtdBelanja && cogsData.manualMtdBelanja !== undefined && Number(cogsData.manualMtdBelanja) > 0) {
         totalBelanja = Number(cogsData.manualMtdBelanja);
       }
 
-      // 4. Forecast Sisa Hari
+      // 4. Forecast Sisa Hari (Jika cutoff sudah akhir bulan, sisa hari = 0)
+      const isFullMonthCutoff = effectiveCutoffDay >= daysInMonth;
       const avgWeekdaySales = pastWeekdayCount > 0
         ? Math.round(pastWeekdayRevSum / pastWeekdayCount)
         : (cogsData.manualWeekdayAvgSales ? Number(cogsData.manualWeekdayAvgSales) : 0);
@@ -258,9 +291,11 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         ? Math.round(pastWeekendRevSum / pastWeekendCount)
         : (cogsData.manualWeekendAvgSales ? Number(cogsData.manualWeekendAvgSales) : 0);
 
-      const forecastSisaHari = Math.round((remainingWeekdayCount * avgWeekdaySales) + (remainingWeekendCount * avgWeekendSales));
+      const forecastSisaHari = isFullMonthCutoff
+        ? 0
+        : Math.round((remainingWeekdayCount * avgWeekdaySales) + (remainingWeekendCount * avgWeekendSales));
 
-      // 5. Total Projected Full Month
+      // 5. Total Projected Full Month (Jika cutoff akhir bulan, Projected = Actual Revenue Full Month)
       const totalProjectedFullMonth = actualRevenueMTD + forecastSisaHari;
 
       // 6. Opening Inventory
@@ -310,7 +345,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       return {
         outlet: outletName,
         area,
-        cutoffDay,
+        cutoffDay: effectiveCutoffDay,
         mtdBudgetRevenue,
         actualRevenue: actualRevenueMTD,
         forecastSisaHari,
@@ -331,7 +366,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         projectedCogsPercent
       };
     });
-  }, [activeOutletsList, allOutletsData, selectedMonth, selectedYear, daysInMonth, monthKey]);
+  }, [activeOutletsList, allOutletsData, selectedMonth, selectedYear, daysInMonth, monthKey, filterCutoffMode, filterStartDay, filterCutoffDay]);
 
   // Filtered rows based on Area, Outlet & Search
   const filteredRows = useMemo(() => {
@@ -429,7 +464,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
 
       // Title
       worksheet.mergeCells('A1:N1');
-      worksheet.getCell('A1').value = `LAPORAN REGIONAL COGS & FORECAST REVENUE CONTROL - ${monthName.toUpperCase()} ${selectedYear}`;
+      worksheet.getCell('A1').value = `LAPORAN REGIONAL COGS & FORECAST REVENUE CONTROL (${activeCutoffLabel.toUpperCase()}) - ${monthName.toUpperCase()} ${selectedYear}`;
       worksheet.getCell('A1').font = { size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
       worksheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
       worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
@@ -594,7 +629,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `REGIONAL_COGS_FORECAST_CONTROL_${monthName}_${selectedYear}.xlsx`);
+      const cutoffSuffix = filterCutoffMode === 'CUSTOM' ? `TGL${filterStartDay}-${filterCutoffDay}` : 'AUTO';
+      saveAs(blob, `REGIONAL_COGS_FORECAST_CONTROL_${monthName}_${selectedYear}_${cutoffSuffix}.xlsx`);
       showToast?.('Berhasil mengekspor Laporan COGS Regional ke Excel!', 'success');
     } catch (err) {
       console.error('Export error:', err);
@@ -605,12 +641,13 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
   // Copy WhatsApp Summary
   const handleCopyWA = () => {
     let msg = `*📊 REGIONAL COGS & FORECAST REVENUE CONTROL*\n`;
-    msg += `*Periode:* ${monthName} ${selectedYear}\n\n`;
+    msg += `*Periode:* ${monthName} ${selectedYear} (${activeCutoffLabel})\n\n`;
 
     areaGroups.forEach(([areaName, rows]) => {
       msg += `📍 *AREA: ${areaName}*\n`;
       rows.forEach(r => {
         msg += `• *${r.outlet}*\n`;
+        msg += `  - Cutoff: Tgl ${r.cutoffDay}\n`;
         msg += `  - Budget Rev: Rp ${formatIDR(r.mtdBudgetRevenue)}\n`;
         msg += `  - Actual Rev: Rp ${formatIDR(r.actualRevenue)}\n`;
         msg += `  - Forecast Sisa Hari: Rp ${formatIDR(r.forecastSisaHari)}\n`;
@@ -635,7 +672,7 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
       msg += `------------------------------------\n\n`;
     });
 
-    msg += `🏆 *GRAND TOTAL REGIONAL:*\n`;
+    msg += `🏆 *GRAND TOTAL REGIONAL (${activeCutoffLabel}):*\n`;
     msg += `• MTD Budget Rev: Rp ${formatIDR(grandTotals.mtdBudgetRevenue)}\n`;
     msg += `• Actual Rev: Rp ${formatIDR(grandTotals.actualRevenue)}\n`;
     msg += `• Forecast Sisa Hari: Rp ${formatIDR(grandTotals.forecastSisaHari)}\n`;
@@ -717,6 +754,228 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* FILTER TANGGAL CUT OFF COGS & FORECAST REGIONAL */}
+      <div className="glass-card bg-slate-900/95 p-4 rounded-2xl border border-indigo-500/30 shadow-xl backdrop-blur-md space-y-3">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-white/10 pb-2.5">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-sm font-black border border-indigo-500/30">
+              <i className="fas fa-calendar-alt"></i>
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                  Filter Tanggal Cut Off & Data Aktual
+                </h4>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border ${
+                  filterCutoffMode === 'CUSTOM' && filterCutoffDay === daysInMonth
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                }`}>
+                  {activeCutoffLabel}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Pilih tanggal cutoff untuk melihat realisasi Revenue, Belanja, dan COGS aktual (Tgl 1 s/d Akhir Bulan atau tanggal tertentu).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end md:self-center">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-white/5">
+              Periode: {monthName} {selectedYear}
+            </span>
+          </div>
+        </div>
+
+        {/* Preset Buttons & Interactive Stepper / Slider */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Quick Presets */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase text-slate-400 mr-1 flex items-center gap-1">
+              <i className="fas fa-bolt text-amber-400 text-[10px]"></i> Preset:
+            </span>
+
+            {/* FULL MONTH / AKHIR BULAN PRESET */}
+            <button
+              type="button"
+              onClick={() => {
+                setFilterCutoffMode('CUSTOM');
+                setFilterStartDay(1);
+                setFilterCutoffDay(daysInMonth);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
+                filterCutoffMode === 'CUSTOM' && filterCutoffDay === daysInMonth && filterStartDay === 1
+                  ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-900/40'
+                  : 'bg-slate-950/80 text-emerald-400 hover:text-white hover:bg-emerald-600/30 border-emerald-500/30'
+              }`}
+            >
+              <i className="fas fa-calendar-check"></i>
+              <span>1 - {daysInMonth} (Full Month / Akhir Bulan)</span>
+            </button>
+
+            {/* 1 - 25 */}
+            {daysInMonth >= 25 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterCutoffMode('CUSTOM');
+                  setFilterStartDay(1);
+                  setFilterCutoffDay(25);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  filterCutoffMode === 'CUSTOM' && filterCutoffDay === 25
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-900/40'
+                    : 'bg-slate-950/80 text-slate-300 hover:text-white hover:bg-slate-800 border-white/10'
+                }`}
+              >
+                1 - 25
+              </button>
+            )}
+
+            {/* 1 - 20 */}
+            {daysInMonth >= 20 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterCutoffMode('CUSTOM');
+                  setFilterStartDay(1);
+                  setFilterCutoffDay(20);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  filterCutoffMode === 'CUSTOM' && filterCutoffDay === 20
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-900/40'
+                    : 'bg-slate-950/80 text-slate-300 hover:text-white hover:bg-slate-800 border-white/10'
+                }`}
+              >
+                1 - 20
+              </button>
+            )}
+
+            {/* 1 - 15 */}
+            {daysInMonth >= 15 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterCutoffMode('CUSTOM');
+                  setFilterStartDay(1);
+                  setFilterCutoffDay(15);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  filterCutoffMode === 'CUSTOM' && filterCutoffDay === 15
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-900/40'
+                    : 'bg-slate-950/80 text-slate-300 hover:text-white hover:bg-slate-800 border-white/10'
+                }`}
+              >
+                1 - 15
+              </button>
+            )}
+
+            {/* 1 - 10 */}
+            <button
+              type="button"
+              onClick={() => {
+                setFilterCutoffMode('CUSTOM');
+                setFilterStartDay(1);
+                setFilterCutoffDay(10);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                filterCutoffMode === 'CUSTOM' && filterCutoffDay === 10
+                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-900/40'
+                  : 'bg-slate-950/80 text-slate-300 hover:text-white hover:bg-slate-800 border-white/10'
+              }`}
+            >
+              1 - 10
+            </button>
+
+            {/* HARI INI (if current month) */}
+            {selectedYear === currentYear && selectedMonth === currentMonth && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterCutoffMode('CUSTOM');
+                  setFilterStartDay(1);
+                  setFilterCutoffDay(currentDateNum);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  filterCutoffMode === 'CUSTOM' && filterCutoffDay === currentDateNum
+                    ? 'bg-amber-600 text-white border-amber-400 shadow-md shadow-amber-900/40'
+                    : 'bg-slate-950/80 text-amber-300 hover:text-white hover:bg-slate-800 border-amber-500/20'
+                }`}
+              >
+                Hari Ini (1 - {currentDateNum})
+              </button>
+            )}
+
+            {/* AUTO OUTLET */}
+            <button
+              type="button"
+              onClick={() => {
+                setFilterCutoffMode('AUTO');
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                filterCutoffMode === 'AUTO'
+                  ? 'bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-900/40'
+                  : 'bg-slate-950/80 text-slate-400 hover:text-white hover:bg-slate-800 border-white/10'
+              }`}
+              title="Gunakan Cutoff yang diatur di masing-masing Outlet COGS"
+            >
+              <i className="fas fa-sliders-h text-[10px]"></i> Auto (Cutoff Tiap Outlet)
+            </button>
+          </div>
+
+          {/* Stepper & Slider Cutoff Date */}
+          <div className="flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-white/10 ml-auto">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+              Cutoff Tgl:
+            </span>
+            <button
+              type="button"
+              disabled={filterCutoffMode === 'CUSTOM' && filterCutoffDay <= 1}
+              onClick={() => {
+                setFilterCutoffMode('CUSTOM');
+                setFilterCutoffDay(prev => Math.max(1, prev - 1));
+              }}
+              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-black flex items-center justify-center transition-all cursor-pointer"
+              title="Kurang 1 Hari"
+            >
+              <i className="fas fa-minus text-[10px]"></i>
+            </button>
+
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={daysInMonth}
+                value={filterCutoffMode === 'CUSTOM' ? filterCutoffDay : ''}
+                placeholder={filterCutoffMode === 'AUTO' ? 'Auto' : String(filterCutoffDay)}
+                onChange={e => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val)) {
+                    setFilterCutoffMode('CUSTOM');
+                    setFilterCutoffDay(Math.min(daysInMonth, Math.max(1, val)));
+                  }
+                }}
+                className="w-12 bg-slate-900 border border-white/20 rounded-lg py-1 text-center font-mono font-black text-xs text-white outline-none focus:border-indigo-400"
+              />
+              <span className="text-[10px] text-slate-400 font-bold">/ {daysInMonth}</span>
+            </div>
+
+            <button
+              type="button"
+              disabled={filterCutoffMode === 'CUSTOM' && filterCutoffDay >= daysInMonth}
+              onClick={() => {
+                setFilterCutoffMode('CUSTOM');
+                setFilterCutoffDay(prev => Math.min(daysInMonth, prev + 1));
+              }}
+              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-black flex items-center justify-center transition-all cursor-pointer"
+              title="Tambah 1 Hari"
+            >
+              <i className="fas fa-plus text-[10px]"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Top Summary KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
@@ -732,8 +991,8 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           <p className="text-sm font-black text-emerald-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.actualRevenue)}
           </p>
-          <span className="text-[8px] text-emerald-500 font-bold mt-0.5">
-            {grandTotals.mtdBudgetRevenue > 0 ? `${((grandTotals.actualRevenue / grandTotals.mtdBudgetRevenue) * 100).toFixed(1)}% Achieved` : '0%'}
+          <span className="text-[8px] text-emerald-500 font-bold mt-0.5 truncate" title={activeCutoffLabel}>
+            {grandTotals.mtdBudgetRevenue > 0 ? `${((grandTotals.actualRevenue / grandTotals.mtdBudgetRevenue) * 100).toFixed(1)}% Achieved` : '0%'} • {activeCutoffLabel}
           </span>
         </div>
 
@@ -742,7 +1001,9 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
           <p className="text-sm font-black text-indigo-400 mt-1 truncate">
             Rp {formatIDR(grandTotals.totalProjectedFullMonth)}
           </p>
-          <span className="text-[8px] text-slate-500 mt-0.5">Actual + Forecast Sisa</span>
+          <span className="text-[8px] text-slate-500 mt-0.5">
+            {filterCutoffMode === 'CUSTOM' && filterCutoffDay === daysInMonth ? 'Full Month Actual' : 'Actual + Forecast Sisa'}
+          </span>
         </div>
 
         <div className="glass-card bg-slate-950/60 p-3 border-white/5 rounded-2xl flex flex-col justify-between">
@@ -894,7 +1155,9 @@ export const RegionalCogsRecapTable: React.FC<Props> = ({
                               {row.outlet}
                             </span>
                             <span className="text-[9px] text-slate-500 font-medium">
-                              Cutoff Tgl {row.cutoffDay}
+                              {filterCutoffMode === 'CUSTOM'
+                                ? `Cutoff Tgl ${filterStartDay}-${row.cutoffDay}${row.cutoffDay === daysInMonth ? ' (Full/Akhir Bulan)' : ''}`
+                                : `Cutoff Tgl ${row.cutoffDay}`}
                             </span>
                           </div>
                         </td>
