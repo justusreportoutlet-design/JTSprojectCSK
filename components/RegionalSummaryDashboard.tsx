@@ -9,10 +9,7 @@ import {
   getQaScoreTier, 
   getActiveOutletNames, 
   getActiveRegionalAreas, 
-  getActiveOutletConfigs,
-  findOutletData,
-  getOutletMonthData,
-  extractAllGSIEntries
+  getActiveOutletConfigs 
 } from '../constants';
 import { createDefaultManpowerData, calculateManpowerSummary, extractOutletManpowerMap, resolveOutletManpowerData } from '../lib/manpowerUtils';
 import { calculateReceivingSheetTotalBelanja } from '../lib/moduleAnalytics';
@@ -205,23 +202,17 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
   // 1. Calculate Comprehensive per-outlet summary for the selected month
   const outletDataList = useMemo(() => {
     return targetOutlets.map((outletName, idx) => {
-      const outletMonths = findOutletData(data, outletName) || {};
-      const mData = getOutletMonthData(outletMonths, selectedMonth, selectedYear) || {};
+      const outletMonths = (data && (data as any)[outletName]) || {};
+      const mData = outletMonths[String(selectedMonth)] || outletMonths[selectedMonth] || {};
       
       // A. Revenue & Budget
-      const sales = mData.sales || outletMonths.sales || { dailyRecording: {} };
+      const sales = mData.sales || { dailyRecording: {} };
       const budget = (sales.monthlyBudgets || {})[monthKey] || sales.budgetRevenue || 0;
-      const combinedDailyRecording = {
-        ...(outletMonths.dailyRecording || {}),
-        ...((outletMonths.sales && outletMonths.sales.dailyRecording) || {}),
-        ...(mData.dailyRecording || {}),
-        ...(sales.dailyRecording || {})
-      };
       
       let mtdRevenue = 0;
       let recordedDays = 0;
-      if (combinedDailyRecording) {
-        Object.entries(combinedDailyRecording).forEach(([dateStr, d]: [string, any]) => {
+      if (sales.dailyRecording) {
+        Object.entries(sales.dailyRecording).forEach(([dateStr, d]: [string, any]) => {
           if (dateStr.startsWith(monthKey)) {
             const rev = Number(d?.revenue) || 
               ((Number(d?.dineInRevenue) || 0) + (Number(d?.takeAwayRevenue) || 0) + (Number(d?.goFoodRevenue) || 0) + (Number(d?.grabFoodRevenue) || 0));
@@ -466,13 +457,13 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
   // Recaps formatted for RegionalSummaryReportRecapTable
   const recapSummaryItems = useMemo<OutletSummaryRecapItem[]>(() => {
     return outletDataList.map((d, idx) => {
-      const outletMonths = findOutletData(data, d.outlet) || {};
-      const mData = getOutletMonthData(outletMonths, selectedMonth, selectedYear) || {};
+      const outletMonths = (data && (data as any)[d.outlet]) || {};
+      const mData = outletMonths[String(selectedMonth)] || outletMonths[selectedMonth] || {};
 
       // Overtime (Cut-off 26 Bulan Lalu s/d 25 Bulan Ini, contoh: 26 Agustus - 25 September)
       const cutoffStart = `${lastMonthKey}-26`;
       const cutoffEnd = `${monthKey}-25`;
-      const lastMData = getOutletMonthData(outletMonths, lastMonthIdx, lastMonthYear) || {};
+      const lastMData = outletMonths[String(lastMonthIdx)] || outletMonths[lastMonthIdx] || {};
 
       let otService = 0, otBar = 0, otKitchen = 0, otTotal = 0, otStaffCount = 0;
       if (mData.weeklyOvertime) {
@@ -496,7 +487,7 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
       }
       if (otTotal === 0) {
         const staffDivMap = new Map<string, string>();
-        [...(outletMonths.staffList || []), ...(lastMData.staffList || []), ...(mData.staffList || [])].forEach((st: any) => {
+        [...(lastMData.staffList || []), ...(mData.staffList || [])].forEach((st: any) => {
           if (st?.id || st?.staffId) staffDivMap.set(st.id || st.staffId, String(st.division || '').toUpperCase());
         });
         const otStaffIds = new Set<string>();
@@ -506,15 +497,13 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
         let dKitchen = 0;
 
         const combinedDailyOT: Record<string, any[]> = {
-          ...(outletMonths.dailyOvertime || {}),
           ...(lastMData.dailyOvertime || {}),
           ...(mData.dailyOvertime || {})
         };
 
         Object.entries(combinedDailyOT).forEach(([dateStr, entries]) => {
-          const rowArr = Array.isArray(entries) ? entries : (entries && typeof entries === 'object' ? Object.values(entries) : []);
-          if (dateStr >= cutoffStart && dateStr <= cutoffEnd && rowArr.length > 0) {
-            rowArr.forEach((e: any) => {
+          if (dateStr >= cutoffStart && dateStr <= cutoffEnd && Array.isArray(entries)) {
+            entries.forEach((e: any) => {
               const h = Number(e.hours) || Number(e.overtimeHours) || 0;
               if (h > 0) {
                 dOt += h;
@@ -539,42 +528,36 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
       const otAverage = otStaffCount > 0 ? otTotal / otStaffCount : 0;
 
       // GSI
-      const extractedGsi = extractAllGSIEntries(outletMonths);
-      const combinedDailyGSI: Record<string, any> = {
-        ...extractedGsi,
-        ...(outletMonths.dailyGSI || {}),
-        ...(mData.dailyGSI || {})
-      };
-
       let qosPos = 0, qosTot = 0, qofPos = 0, qofTot = 0, qobPos = 0, qobTot = 0, aosPos = 0, aosTot = 0, vfmPos = 0, vfmTot = 0;
       let gsiTotalResponses = 0;
-      Object.entries(combinedDailyGSI).forEach(([dateStr, rawRows]: [string, any]) => {
-        const rows = Array.isArray(rawRows) ? rawRows : (rawRows && typeof rawRows === 'object' ? Object.values(rawRows) : []);
-        if (dateStr.startsWith(monthKey) && rows.length > 0) {
-          rows.forEach((r: any) => {
-            const exc = Number(r.excellent) || 0;
-            const gd = Number(r.good) || 0;
-            const avg = Number(r.average) || 0;
-            const pr = Number(r.poor) || 0;
-            const abs = Number(r.abstain) || 0;
-            const pos = exc + gd;
-            const tot = exc + gd + avg + pr;
-            gsiTotalResponses += pos + avg + pr + abs;
-            const sub = String(r.subject || r.label || '').toLowerCase();
-            if (sub.includes('service') && !sub.includes('attentive')) {
-              qosPos += pos; qosTot += tot;
-            } else if (sub.includes('food')) {
-              qofPos += pos; qofTot += tot;
-            } else if (sub.includes('beverage') || sub.includes('drink')) {
-              qobPos += pos; qobTot += tot;
-            } else if (sub.includes('attentive') || sub.includes('staff') || sub.includes('ambiance') || sub.includes('cleanliness')) {
-              aosPos += pos; aosTot += tot;
-            } else if (sub.includes('value') || sub.includes('money') || sub.includes('price')) {
-              vfmPos += pos; vfmTot += tot;
-            }
-          });
-        }
-      });
+      if (mData.dailyGSI) {
+        Object.entries(mData.dailyGSI).forEach(([dateStr, rows]: [string, any]) => {
+          if (dateStr.startsWith(monthKey) && Array.isArray(rows)) {
+            rows.forEach((r: any) => {
+              const exc = Number(r.excellent) || 0;
+              const gd = Number(r.good) || 0;
+              const avg = Number(r.average) || 0;
+              const pr = Number(r.poor) || 0;
+              const abs = Number(r.abstain) || 0;
+              const pos = exc + gd;
+              const tot = exc + gd + avg + pr;
+              gsiTotalResponses += pos + avg + pr + abs;
+              const sub = String(r.subject || r.label || '').toLowerCase();
+              if (sub.includes('service') && !sub.includes('attentive')) {
+                qosPos += pos; qosTot += tot;
+              } else if (sub.includes('food')) {
+                qofPos += pos; qofTot += tot;
+              } else if (sub.includes('beverage') || sub.includes('drink')) {
+                qobPos += pos; qobTot += tot;
+              } else if (sub.includes('attentive') || sub.includes('staff') || sub.includes('ambiance') || sub.includes('cleanliness')) {
+                aosPos += pos; aosTot += tot;
+              } else if (sub.includes('value') || sub.includes('money') || sub.includes('price')) {
+                vfmPos += pos; vfmTot += tot;
+              }
+            });
+          }
+        });
+      }
       const gsiQos = qosTot > 0 ? (qosPos / qosTot) * 100 : 0;
       const gsiQof = qofTot > 0 ? (qofPos / qofTot) * 100 : 0;
       const gsiQob = qobTot > 0 ? (qobPos / qobTot) * 100 : 0;
@@ -585,62 +568,38 @@ export const RegionalSummaryDashboard: React.FC<Props> = ({
 
       // Google Review
       let grRating = 0, grTotalReviews = 0;
-      const grData = mData.googleReviews?.[monthKey] || outletMonths.googleReviews?.[monthKey] || mData.googleReview || outletMonths.googleReview;
-      if (grData) {
-        grRating = Number(grData.rating || grData.currentRating) || 0;
-        grTotalReviews = Number(grData.totalReviews || grData.totalReview) || 0;
-      }
-      if (grTotalReviews === 0) {
-        const dailyGR: Record<string, any> = {
-          ...(outletMonths.dailyGoogleReview || {}),
-          ...(mData.dailyGoogleReview || {})
-        };
-        let sCount = 0;
-        let sPoints = 0;
-        Object.entries(dailyGR).forEach(([dStr, val]: [string, any]) => {
-          if (dStr.startsWith(monthKey) && val) {
-            const s1 = Number(val.stars1) || 0;
-            const s2 = Number(val.stars2) || 0;
-            const s3 = Number(val.stars3) || 0;
-            const s4 = Number(val.stars4) || 0;
-            const s5 = Number(val.stars5) || 0;
-            const tot = s1 + s2 + s3 + s4 + s5;
-            sCount += tot;
-            sPoints += (s1 * 1 + s2 * 2 + s3 * 3 + s4 * 4 + s5 * 5);
-          }
-        });
-        if (sCount > 0) {
-          grTotalReviews = sCount;
-          grRating = Number((sPoints / sCount).toFixed(2));
-        }
+      if (mData.googleReviews?.[monthKey]) {
+        grRating = Number(mData.googleReviews[monthKey].rating) || 0;
+        grTotalReviews = Number(mData.googleReviews[monthKey].totalReviews) || 0;
+      } else if (mData.googleReview) {
+        grRating = Number(mData.googleReview.currentRating) || 0;
+        grTotalReviews = Number(mData.googleReview.totalReview) || 0;
       }
 
       // CPA
       let cpaFood = 0, cpaBeverage = 0, cpaService = 0;
-      const combinedCPA: Record<string, any> = {
-        ...(outletMonths.dailyCPA || {}),
-        ...(mData.dailyCPA || {})
-      };
-      Object.entries(combinedCPA).forEach(([dateStr, entries]: [string, any]) => {
-        const eArr = Array.isArray(entries) ? entries : (entries && typeof entries === 'object' ? Object.values(entries) : []);
-        if (dateStr.startsWith(monthKey) && eArr.length > 0) {
-          eArr.forEach((e: any) => {
-            const cat = String(e.category || '').toUpperCase();
+      if (mData.dailyCPA) {
+        Object.entries(mData.dailyCPA).forEach(([dateStr, entries]: [string, any]) => {
+          if (dateStr.startsWith(monthKey) && Array.isArray(entries)) {
+            entries.forEach((e: any) => {
+              const cat = String(e.category || '').toUpperCase();
+              if (cat.includes('FOOD')) cpaFood++;
+              else if (cat.includes('BEV')) cpaBeverage++;
+              else cpaService++;
+            });
+          }
+        });
+      }
+      if (mData.guestComplaints && Array.isArray(mData.guestComplaints)) {
+        mData.guestComplaints.forEach((c: any) => {
+          if (String(c.date || '').startsWith(monthKey)) {
+            const cat = String(c.category || c.type || '').toUpperCase();
             if (cat.includes('FOOD')) cpaFood++;
             else if (cat.includes('BEV')) cpaBeverage++;
             else cpaService++;
-          });
-        }
-      });
-      const allComplaints = [...(outletMonths.guestComplaints || []), ...(mData.guestComplaints || [])];
-      allComplaints.forEach((c: any) => {
-        if (String(c.date || '').startsWith(monthKey)) {
-          const cat = String(c.category || c.type || '').toUpperCase();
-          if (cat.includes('FOOD')) cpaFood++;
-          else if (cat.includes('BEV')) cpaBeverage++;
-          else cpaService++;
-        }
-      });
+          }
+        });
+      }
       const cpaTotal = cpaFood + cpaBeverage + cpaService;
 
       // OPEX (Hanya 6 Kategori: Non Commodity, Commodity, ATK, Maintenance, Asset, Casual)

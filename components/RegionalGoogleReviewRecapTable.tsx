@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { OUTLETS, REGIONAL_AREAS, getAreaForOutlet, getActiveOutletNames, findOutletData, getOutletMonthData } from '../constants';
+import { OUTLETS, REGIONAL_AREAS, getAreaForOutlet, getActiveOutletNames } from '../constants';
 import { RegionalMatrixReportTable } from './RegionalMatrixReportTable';
 
 interface Props {
@@ -62,10 +62,10 @@ export const RegionalGoogleReviewRecapTable: React.FC<Props> = ({
 
   // Process Google Review data per outlet
   const outletRecaps = useMemo<OutletGoogleReviewRecap[]>(() => {
-    const activeNames = Array.from(new Set([...getActiveOutletNames(), ...Object.keys(allOutletsData || {})]));
+    const activeNames = getActiveOutletNames();
     return activeNames.map(outletName => {
-      const outletMonths = findOutletData(allOutletsData, outletName) || {};
-      const mData = getOutletMonthData(outletMonths, selectedMonth, selectedYear) || {};
+      const outletMonths = allOutletsData?.[outletName] || {};
+      const mData = outletMonths[String(selectedMonth)] || outletMonths[selectedMonth] || {};
       const dailyGR: Record<string, any> = {
         ...(outletMonths.dailyGoogleReview || {}),
         ...(mData.dailyGoogleReview || {})

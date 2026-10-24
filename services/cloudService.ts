@@ -405,55 +405,8 @@ export function unpackOutletDocument(docData: any): any {
 
   const rootDailyAttendance: Record<string, any[]> = (docData.dailyAttendance && typeof docData.dailyAttendance === 'object') ? docData.dailyAttendance : {};
   const rootDailyExternalAudit: Record<string, any[]> = (docData.dailyExternalAudit && typeof docData.dailyExternalAudit === 'object') ? docData.dailyExternalAudit : {};
-  
-  // Consolidate dailyCPA across root and all 12 months
-  const combinedDailyCPA: Record<string, any[]> = {
-    ...(docData.dailyCPA && typeof docData.dailyCPA === 'object' ? docData.dailyCPA : {})
-  };
-  for (let m = 0; m < 12; m++) {
-    const mCpa = monthlyData[m.toString()]?.dailyCPA;
-    if (mCpa && typeof mCpa === 'object') {
-      Object.assign(combinedDailyCPA, mCpa);
-    }
-  }
-
-  // Consolidate dailyGSI across root and all 12 months
-  const combinedDailyGSI: Record<string, any[]> = {
-    ...(docData.dailyGSI && typeof docData.dailyGSI === 'object' ? docData.dailyGSI : {})
-  };
-  for (let m = 0; m < 12; m++) {
-    const mGsi = monthlyData[m.toString()]?.dailyGSI;
-    if (mGsi && typeof mGsi === 'object') {
-      Object.entries(mGsi).forEach(([dKey, rows]) => {
-        if (!combinedDailyGSI[dKey] || (Array.isArray(rows) && rows.length > 0)) {
-          combinedDailyGSI[dKey] = rows as any[];
-        }
-      });
-    }
-  }
-
-  // Consolidate dailyQA across root and all 12 months
-  const combinedDailyQA: Record<string, any> = {
-    ...(docData.dailyQA && typeof docData.dailyQA === 'object' ? docData.dailyQA : {})
-  };
-  for (let m = 0; m < 12; m++) {
-    const mQa = monthlyData[m.toString()]?.dailyQA;
-    if (mQa && typeof mQa === 'object') {
-      Object.assign(combinedDailyQA, mQa);
-    }
-  }
-
-  // Consolidate dailyGoogleReview across root and all 12 months
-  const combinedDailyGoogleReview: Record<string, any> = {
-    ...(docData.dailyGoogleReview && typeof docData.dailyGoogleReview === 'object' ? docData.dailyGoogleReview : {})
-  };
-  for (let m = 0; m < 12; m++) {
-    const mGr = monthlyData[m.toString()]?.dailyGoogleReview;
-    if (mGr && typeof mGr === 'object') {
-      Object.assign(combinedDailyGoogleReview, mGr);
-    }
-  }
-
+  const rootDailyCPA: Record<string, any[]> = (docData.dailyCPA && typeof docData.dailyCPA === 'object') ? docData.dailyCPA : {};
+  const rootDailyGSI: Record<string, any[]> = (docData.dailyGSI && typeof docData.dailyGSI === 'object') ? docData.dailyGSI : {};
   const rootGuestComplaints: any[] = Array.isArray(docData.guestComplaints) ? docData.guestComplaints : [];
   const rootAffiliateHistory: any[] = Array.isArray(docData.affiliateHistory) ? docData.affiliateHistory : [];
 
@@ -473,28 +426,11 @@ export function unpackOutletDocument(docData: any): any {
       staffList: rootStaffList,
       leaveRecords: rootLeaveRecords,
       manpowerData: rootManpowerData,
-      dailyOvertime: {
-        ...rootDailyOvertime,
-        ...(mData.dailyOvertime || {})
-      },
+      dailyOvertime: rootDailyOvertime,
       dailyAttendance: rootDailyAttendance,
       dailyExternalAudit: rootDailyExternalAudit,
-      dailyCPA: {
-        ...combinedDailyCPA,
-        ...(mData.dailyCPA || {})
-      },
-      dailyGSI: {
-        ...combinedDailyGSI,
-        ...(mData.dailyGSI || {})
-      },
-      dailyQA: {
-        ...combinedDailyQA,
-        ...(mData.dailyQA || {})
-      },
-      dailyGoogleReview: {
-        ...combinedDailyGoogleReview,
-        ...(mData.dailyGoogleReview || {})
-      },
+      dailyCPA: rootDailyCPA,
+      dailyGSI: rootDailyGSI,
       guestComplaints: rootGuestComplaints,
       affiliateHistory: rootAffiliateHistory,
       logisticItems: rootLogisticItems,
@@ -513,10 +449,8 @@ export function unpackOutletDocument(docData: any): any {
   filledMonthlyData.dailyOvertime = rootDailyOvertime;
   filledMonthlyData.dailyAttendance = rootDailyAttendance;
   filledMonthlyData.dailyExternalAudit = rootDailyExternalAudit;
-  filledMonthlyData.dailyCPA = combinedDailyCPA;
-  filledMonthlyData.dailyGSI = combinedDailyGSI;
-  filledMonthlyData.dailyQA = combinedDailyQA;
-  filledMonthlyData.dailyGoogleReview = combinedDailyGoogleReview;
+  filledMonthlyData.dailyCPA = rootDailyCPA;
+  filledMonthlyData.dailyGSI = rootDailyGSI;
   filledMonthlyData.guestComplaints = rootGuestComplaints;
   filledMonthlyData.affiliateHistory = rootAffiliateHistory;
   filledMonthlyData.logisticItems = rootLogisticItems;

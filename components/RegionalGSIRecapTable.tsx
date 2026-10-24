@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { OUTLETS, REGIONAL_AREAS, getAreaForOutlet, INITIAL_GSI_STRUCTURE, getActiveOutletNames, findOutletData, extractAllGSIEntries, getOutletMonthData } from '../constants';
+import { OUTLETS, REGIONAL_AREAS, getAreaForOutlet, INITIAL_GSI_STRUCTURE, getActiveOutletNames } from '../constants';
 import { GSIRow } from '../types';
 import { RegionalMatrixReportTable } from './RegionalMatrixReportTable';
 
@@ -112,13 +112,11 @@ export const RegionalGSIRecapTable: React.FC<Props> = ({
 
   // Compute GSI recap per outlet
   const outletRecaps = useMemo<OutletGsiRecap[]>(() => {
-    const activeNames = Array.from(new Set([...getActiveOutletNames(), ...Object.keys(allOutletsData || {})]));
+    const activeNames = getActiveOutletNames();
     return activeNames.map(outletName => {
-      const outletMonths = findOutletData(allOutletsData, outletName) || {};
-      const mData = getOutletMonthData(outletMonths, selectedMonth, selectedYear) || {};
-      const extractedGsi = extractAllGSIEntries(outletMonths);
-      const dailyGSI: Record<string, any> = {
-        ...extractedGsi,
+      const outletMonths = allOutletsData?.[outletName] || {};
+      const mData = outletMonths[String(selectedMonth)] || outletMonths[selectedMonth] || {};
+      const dailyGSI: Record<string, GSIRow[]> = {
         ...(outletMonths.dailyGSI || {}),
         ...(mData.dailyGSI || {})
       };
@@ -135,12 +133,10 @@ export const RegionalGSIRecapTable: React.FC<Props> = ({
       const datesFound = new Set<string>();
       let totalResponsesCount = 0;
 
-      Object.entries(dailyGSI).forEach(([dateStr, rawRows]) => {
-        const rows = Array.isArray(rawRows) ? rawRows : (rawRows && typeof rawRows === 'object' ? Object.values(rawRows) : []);
+      Object.entries(dailyGSI).forEach(([dateStr, rows]) => {
         const isMatch = (() => {
           if (dateStr.startsWith(monthKey)) return true;
           if (dateStr.startsWith(`${selectedYear}-${selectedMonth + 1}-`)) return true;
-          if (dateStr.startsWith(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-`)) return true;
           const dt = new Date(dateStr);
           if (!isNaN(dt.getTime()) && dt.getMonth() === selectedMonth && dt.getFullYear() === selectedYear) return true;
           const dayNum = Number(dateStr);
@@ -148,7 +144,7 @@ export const RegionalGSIRecapTable: React.FC<Props> = ({
           return false;
         })();
 
-        if (isMatch && rows.length > 0) {
+        if (isMatch && Array.isArray(rows) && rows.length > 0) {
           let dayMaxResp = 0;
           rows.forEach((r: any) => {
             const key = getSubjectKey(r.subject || r.label || '');
@@ -468,14 +464,11 @@ export const RegionalGSIRecapTable: React.FC<Props> = ({
   // "METODE REKAP GSI ADALAH DARI KE 5 SUBJECT YANG DI ISI = TOTAL RESPON NYA = 1 DI BAGI PERSENTASE RATA+ SETIAP POINT SUBJECT"
   const dailyMatrix = useMemo(() => {
     const matrix: Record<string, Record<number, { responses: number; percentage: number; hasData: boolean }>> = {};
-    const activeNames = Array.from(new Set([...getActiveOutletNames(), ...Object.keys(allOutletsData || {})]));
 
-    activeNames.forEach(outletName => {
-      const outletMonths = findOutletData(allOutletsData, outletName) || {};
-      const mData = getOutletMonthData(outletMonths, selectedMonth, selectedYear) || {};
-      const extractedGsi = extractAllGSIEntries(outletMonths);
-      const dailyGSI: Record<string, any> = {
-        ...extractedGsi,
+    OUTLETS.forEach(outletName => {
+      const outletMonths = allOutletsData?.[outletName] || {};
+      const mData = outletMonths[String(selectedMonth)] || outletMonths[selectedMonth] || {};
+      const dailyGSI: Record<string, any[]> = {
         ...(outletMonths.dailyGSI || {}),
         ...(mData.dailyGSI || {})
       };
@@ -486,22 +479,15 @@ export const RegionalGSIRecapTable: React.FC<Props> = ({
         const dateStr = `${monthKey}-${String(d).padStart(2, '0')}`;
         let rows: any[] | null = null;
 
-        const candidate = dailyGSI[dateStr] || dailyGSI[String(d)] || dailyGSI[d];
-        if (candidate) {
-          const arr = Array.isArray(candidate) ? candidate : (candidate && typeof candidate === 'object' ? Object.values(candidate) : []);
-          if (arr.length > 0) rows = arr;
-        }
-
-        if (!rows) {
+        if (dailyGSI[dateStr] && Array.isArray(dailyGSI[dateStr])) {
+          rows = dailyGSI[dateStr];
+        } else if (dailyGSI[String(d)] && Array.isArray(dailyGSI[String(d)])) {
+          rows = dailyGSI[String(d)];
+        } else {
           for (const [k, val] of Object.entries(dailyGSI)) {
-            const arr = Array.isArray(val) ? val : (val && typeof val === 'object' ? Object.values(val) : []);
-            if (arr.length === 0) continue;
-            if (
-              k.endsWith(`-${String(d).padStart(2, '0')}`) ||
-              k === `${selectedYear}-${selectedMonth + 1}-${d}` ||
-              k === `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-            ) {
-              rows = arr;
+            if (!Array.isArray(val)) continue;
+            if (k.endsWith(`-${String(d).padStart(2, '0')}`) || k === `${selectedYear}-${selectedMonth + 1}-${d}`) {
+              rows = val;
               break;
             }
           }

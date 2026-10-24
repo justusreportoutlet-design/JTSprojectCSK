@@ -195,50 +195,12 @@ async function startServer() {
         });
       }
 
-      // Consolidate dailyGSI across all months and root
-      const consolidatedGSI: Record<string, any> = {
-        ...(existing.dailyGSI && typeof existing.dailyGSI === 'object' ? existing.dailyGSI : {})
-      };
-      if (extraGlobal?.dailyGSI && typeof extraGlobal.dailyGSI === 'object') {
-        Object.assign(consolidatedGSI, extraGlobal.dailyGSI);
-      }
-      Object.values(existingMonthly).forEach((mObj: any) => {
-        if (mObj?.dailyGSI && typeof mObj.dailyGSI === 'object') {
-          Object.assign(consolidatedGSI, mObj.dailyGSI);
-        }
-      });
-      existing.dailyGSI = consolidatedGSI;
-
-      // Also ensure each month has the consolidated dailyGSI for its dates
-      Object.entries(existingMonthly).forEach(([mKey, mObj]: [string, any]) => {
-        if (mObj && typeof mObj === 'object') {
-          existingMonthly[mKey] = {
-            ...mObj,
-            dailyGSI: {
-              ...consolidatedGSI,
-              ...(mObj.dailyGSI || {})
-            }
-          };
-        }
-      });
-
       existing.monthlyData = existingMonthly;
       existing.isDeleted = false;
       existing.updatedAt = new Date().toISOString();
       existing.lastUpdatedBy = (email || 'outlet-sync').toLowerCase();
 
       outlets[outletId] = existing;
-
-      // Sync alias without or with "SH "
-      const cleanOId = outletId.trim();
-      if (cleanOId.startsWith('SH ')) {
-        const noShKey = cleanOId.substring(3).trim();
-        outlets[noShKey] = existing;
-      } else {
-        const withShKey = `SH ${cleanOId}`;
-        outlets[withShKey] = existing;
-      }
-
       writeOutletsData(outlets);
 
       res.json({ 
