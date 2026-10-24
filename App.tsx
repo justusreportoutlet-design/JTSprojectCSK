@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ModuleType, AppState, User, SyncStatus, Outlet, Notification, LeaveRecord, CustomSupplier } from './types';
-import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames, getStoredCustomSuppliers } from './constants';
+import { INITIAL_STATE, ROLES_BY_DIVISION, DIVISIONS, OUTLETS, getActiveOutletNames, getStoredCustomSuppliers, findOutletData, extractAllGSIEntries } from './constants';
 import { fetchUserData, saveGlobalData, saveOutletData, startRealtimeListener, startNotificationListener, isQuotaExceeded, resetQuotaExceeded, fetchAllOutletsData, startAllOutletsListener, testConnection } from './services/cloudService';
 import { safeStorage, safeClipboard, safeWindow } from './lib/safeStorage';
 import { toLocalDateStr } from './lib/dateUtils';
@@ -585,8 +585,47 @@ const App: React.FC = () => {
         Object.assign(mergedManpowerData, mData.manpowerData);
       }
     }
-    if (monthBase.manpowerData && typeof monthBase.manpowerData === 'object') {
-      Object.assign(mergedManpowerData, monthBase.manpowerData);
+    // Consolidate dailyGSI across all 12 months, globalData, and monthBase
+    const mergedDailyGSI: Record<string, any> = {};
+    for (let m = 0; m < 12; m++) {
+      const mData = outletMonthlyData[m.toString()];
+      if (mData?.dailyGSI && typeof mData.dailyGSI === 'object') {
+        Object.entries(mData.dailyGSI).forEach(([dateStr, rows]) => {
+          if (!mergedDailyGSI[dateStr] || (Array.isArray(rows) && rows.length > 0)) {
+            mergedDailyGSI[dateStr] = rows;
+          }
+        });
+      }
+    }
+    if ((globalData as any).dailyGSI && typeof (globalData as any).dailyGSI === 'object') {
+      Object.assign(mergedDailyGSI, (globalData as any).dailyGSI);
+    }
+    if (monthBase.dailyGSI && typeof monthBase.dailyGSI === 'object') {
+      Object.assign(mergedDailyGSI, monthBase.dailyGSI);
+    }
+
+    // Consolidate dailyQA across all 12 months, globalData, and monthBase
+    const mergedDailyQA: Record<string, any> = {};
+    for (let m = 0; m < 12; m++) {
+      const mData = outletMonthlyData[m.toString()];
+      if (mData?.dailyQA && typeof mData.dailyQA === 'object') {
+        Object.assign(mergedDailyQA, mData.dailyQA);
+      }
+    }
+    if (monthBase.dailyQA && typeof monthBase.dailyQA === 'object') {
+      Object.assign(mergedDailyQA, monthBase.dailyQA);
+    }
+
+    // Consolidate dailyGoogleReview across all 12 months, globalData, and monthBase
+    const mergedDailyGoogleReview: Record<string, any> = {};
+    for (let m = 0; m < 12; m++) {
+      const mData = outletMonthlyData[m.toString()];
+      if (mData?.dailyGoogleReview && typeof mData.dailyGoogleReview === 'object') {
+        Object.assign(mergedDailyGoogleReview, mData.dailyGoogleReview);
+      }
+    }
+    if (monthBase.dailyGoogleReview && typeof monthBase.dailyGoogleReview === 'object') {
+      Object.assign(mergedDailyGoogleReview, monthBase.dailyGoogleReview);
     }
 
     const activeDailyRec = {
@@ -616,12 +655,15 @@ const App: React.FC = () => {
       manpowerData: mergedManpowerData,
       customSuppliers: activeCustomSuppliers,
       dailyOvertime: { ...(monthBase.dailyOvertime || {}), ...mergedDailyOvertime },
+      dailyGSI: mergedDailyGSI,
+      dailyQA: mergedDailyQA,
+      dailyGoogleReview: mergedDailyGoogleReview,
       logisticBeginningStocks: mergedBeginningStocks,
       dailyLogisticRecords: mergedDailyRecords,
       peminjamanRecords: mergedPeminjaman,
       logisticPeriodPrices: mergedPeriodPrices
     } as AppState;
-  }, [outletMonthlyData, filters.month, globalData.manpowerData, globalData.customSuppliers]);
+  }, [outletMonthlyData, filters.month, globalData.manpowerData, globalData.customSuppliers, (globalData as any).dailyGSI]);
 
   const dataRef = useRef<AppState>(currentData);
   useEffect(() => {
@@ -838,7 +880,7 @@ const App: React.FC = () => {
       activeOutletData.dailyCPA = globalData.dailyCPA;
       activeOutletData.dailyVoidBills = (currentData as any).dailyVoidBills || activeOutletData.dailyVoidBills || {};
       activeOutletData.voidBills = (currentData as any).voidBills || activeOutletData.voidBills || [];
-      activeOutletData.dailyGSI = (globalData as any).dailyGSI;
+      activeOutletData.dailyGSI = (globalData as any).dailyGSI || (currentData as any)?.dailyGSI || {};
       activeOutletData.guestComplaints = globalData.guestComplaints;
       activeOutletData.manpowerData = currentData.manpowerData || globalData.manpowerData;
       activeOutletData.monthlyCogsData = currentData.monthlyCogsData || activeOutletData.monthlyCogsData;
@@ -873,6 +915,30 @@ const App: React.FC = () => {
         merged[user.selectedOutlet] = activeOutletData;
       }
     }
+
+    // 4. Ensure all outlets have consolidated dailyGSI and mirror alias keys (with and without "SH " prefix)
+    Object.keys(merged).forEach(oKey => {
+      const oData = merged[oKey];
+      if (oData) {
+        const allGsi = extractAllGSIEntries(oData);
+        if (Object.keys(allGsi).length > 0) {
+          oData.dailyGSI = { ...(oData.dailyGSI || {}), ...allGsi };
+        }
+      }
+    });
+
+    Object.keys(merged).forEach(key => {
+      const cleanKey = key.trim();
+      const upper = cleanKey.toUpperCase();
+      if (upper.startsWith('SH ')) {
+        const withoutPrefix = cleanKey.substring(3).trim();
+        if (!merged[withoutPrefix]) merged[withoutPrefix] = merged[key];
+      } else {
+        const withPrefix = `SH ${cleanKey}`;
+        if (!merged[withPrefix]) merged[withPrefix] = merged[key];
+      }
+    });
+
     return merged;
   }, [allOutletsData, user.selectedOutlet, outletMonthlyData, globalData, currentData, filters.month, outletConfigVersion]);
 
@@ -1067,8 +1133,9 @@ const App: React.FC = () => {
           });
       }
 
-      const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, guestComplaints, affiliateHistory, ...rest } = cloudData;
+      const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, dailyGSI, guestComplaints, affiliateHistory, ...rest } = cloudData;
       
+      const allGSI = extractAllGSIEntries(cloudData);
       const hydratedGlobal: any = {
         staffList: staffList || INITIAL_STATE.staffList,
         leaveRecords: leaveRecords || INITIAL_STATE.leaveRecords,
@@ -1076,6 +1143,7 @@ const App: React.FC = () => {
         dailyAttendance: dailyAttendance || INITIAL_STATE.dailyAttendance,
         dailyExternalAudit: dailyExternalAudit || {},
         dailyCPA: dailyCPA || {},
+        dailyGSI: { ...(dailyGSI || {}), ...allGSI },
         guestComplaints: guestComplaints || [],
         affiliateHistory: affiliateHistory || []
       };
@@ -1417,16 +1485,20 @@ const App: React.FC = () => {
       user.email, 
       user.selectedOutlet,
       (newData) => {
-        const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, guestComplaints, affiliateHistory, ...rest } = newData;
+        const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, dailyGSI, guestComplaints, affiliateHistory, manpowerData, ...rest } = newData;
         
-        const globalFields = ['staffList', 'leaveRecords', 'dailyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA', 'guestComplaints', 'affiliateHistory'];
+        const incomingAllGSI = extractAllGSIEntries(newData);
+        const resolvedGSI = { ...(dailyGSI || {}), ...incomingAllGSI };
+        const resolvedNewData = { ...newData, dailyGSI: resolvedGSI };
+
+        const globalFields = ['staffList', 'leaveRecords', 'dailyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'manpowerData', 'guestComplaints', 'affiliateHistory'];
 
         setGlobalDataState(prev => {
           let hasChange = false;
           const nextGlobal = { ...prev };
 
           globalFields.forEach(field => {
-            const cloudVal = newData[field];
+            const cloudVal = resolvedNewData[field];
             if (cloudVal === undefined) return;
 
             const cloudHash = JSON.stringify(cloudVal);
@@ -1727,32 +1799,61 @@ const App: React.FC = () => {
               if (!isNaN(mIdx) && mIdx >= 0 && mIdx < 12) {
                 const mKey = mIdx.toString();
                 if (!targetMonthsToUpdate[mKey]) targetMonthsToUpdate[mKey] = {};
-                targetMonthsToUpdate[mKey][dStr] = rec;
+                if (!targetMonthsToUpdate[mKey].dailyRecording) targetMonthsToUpdate[mKey].dailyRecording = {};
+                targetMonthsToUpdate[mKey].dailyRecording[dStr] = rec;
               }
             }
           });
         }
+
+        const dateFields = ['dailyGSI', 'dailyQA', 'dailyGoogleReview', 'dailyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA'];
+        dateFields.forEach(f => {
+          if (monthlyUpdates[f] && typeof monthlyUpdates[f] === 'object') {
+            Object.entries(monthlyUpdates[f]).forEach(([dStr, val]) => {
+              const parts = dStr.split('-');
+              if (parts.length >= 2) {
+                const mIdx = parseInt(parts[1], 10) - 1;
+                if (!isNaN(mIdx) && mIdx >= 0 && mIdx < 12) {
+                  const mKey = mIdx.toString();
+                  if (!targetMonthsToUpdate[mKey]) targetMonthsToUpdate[mKey] = {};
+                  if (!targetMonthsToUpdate[mKey][f]) targetMonthsToUpdate[mKey][f] = {};
+                  targetMonthsToUpdate[mKey][f][dStr] = val;
+                }
+              }
+            });
+          }
+        });
 
         const nextMonths: Record<string, any> = {
           ...prev,
           [monthKey]: { ...currentMonthBase, ...monthlyUpdates }
         };
 
-        Object.entries(targetMonthsToUpdate).forEach(([tMKey, entries]) => {
+        Object.entries(targetMonthsToUpdate).forEach(([tMKey, fieldUpdates]) => {
           if (tMKey !== monthKey) {
             const tBase = nextMonths[tMKey] || INITIAL_STATE;
-            const updatedTDailyRec = {
-              ...(tBase.dailyRecording || {}),
-              ...entries
-            };
-            nextMonths[tMKey] = {
-              ...tBase,
-              dailyRecording: updatedTDailyRec,
-              sales: {
-                ...(tBase.sales || {}),
-                dailyRecording: updatedTDailyRec
+            const updatedTMonth: any = { ...tBase };
+            Object.entries(fieldUpdates).forEach(([fName, val]) => {
+              if (fName === 'dailyRecording') {
+                const updatedTDailyRec = {
+                  ...(tBase.dailyRecording || {}),
+                  ...(val as any)
+                };
+                updatedTMonth.dailyRecording = updatedTDailyRec;
+                updatedTMonth.sales = {
+                  ...(tBase.sales || {}),
+                  dailyRecording: updatedTDailyRec
+                };
+              } else if (typeof val === 'object' && val !== null) {
+                updatedTMonth[fName] = {
+                  ...(tBase[fName] || {}),
+                  ...(val as any)
+                };
+              } else {
+                updatedTMonth[fName] = val;
               }
-            };
+            });
+            nextMonths[tMKey] = updatedTMonth;
           }
         });
 
