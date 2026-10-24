@@ -1,10 +1,10 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { AppState, Staff, GSIRow, StaffStatus, Division, Outlet, User, PromoSettings, QAData, QASection } from '../types';
+import { AppState, Staff, GSIRow, StaffStatus, Division, Outlet, User, PromoSettings, QAData, QASection, QAServiceSection, QAKitchenSection, QABarSection } from '../types';
 import { sortStaff, calculateLeaveEntitlement } from '../lib/staffUtils';
 import { getMergedLeaveRecords } from '../lib/scheduleUtils';
 import { toLocalDateStr } from '../lib/dateUtils';
-import { INITIAL_GSI_STRUCTURE, DIVISIONS, OUTLETS, ROLES_BY_DIVISION, MONTH_NAMES, QA_PASSING_TIERS, getQaScoreTier } from '../constants';
+import { INITIAL_GSI_STRUCTURE, DIVISIONS, OUTLETS, ROLES_BY_DIVISION, MONTH_NAMES, QA_PASSING_TIERS, getQaScoreTier, QA_SERVICE_SUBJECTS, QA_KITCHEN_SUBJECTS, QA_BAR_SUBJECTS, calcQAScore } from '../constants';
 import { pushNotification } from '../services/cloudService';
 import { safeWindow } from '../lib/safeStorage';
 import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
@@ -800,15 +800,33 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
   const [isSavingQA, setIsSavingQA] = useState(false);
   const [isEditingQA, setIsEditingQA] = useState(false);
 
-  // Form input states for 3 Divisions
-  const [qaKitchen, setQaKitchen] = useState<{ product: number; cleanliness: number; grooming: number }>({
-    product: 0, cleanliness: 0, grooming: 0
+  // Form input states for 3 Divisions with 7 subjects each
+  const [qaKitchen, setQaKitchen] = useState<QAKitchenSection>({
+    chemicalControl: 0,
+    cleaningSanitation: 0,
+    emergencySafety: 0,
+    foodBeverageQuality: 0,
+    personalHygiene: 0,
+    pestControl: 0,
+    receivingStoragePrep: 0,
   });
-  const [qaBar, setQaBar] = useState<{ product: number; cleanliness: number; grooming: number }>({
-    product: 0, cleanliness: 0, grooming: 0
+  const [qaBar, setQaBar] = useState<QABarSection>({
+    chemicalControl: 0,
+    cleaningSanitation: 0,
+    emergencySafety: 0,
+    foodBeverageQuality: 0,
+    personalHygiene: 0,
+    pestControl: 0,
+    receivingStoragePrep: 0,
   });
-  const [qaService, setQaService] = useState<{ product: number; cleanliness: number; grooming: number }>({
-    product: 0, cleanliness: 0, grooming: 0
+  const [qaService, setQaService] = useState<QAServiceSection>({
+    chemicalControl: 0,
+    emergencySafety: 0,
+    personalHygiene: 0,
+    restaurantCleanliness: 0,
+    sequenceOfService: 0,
+    serviceHospitality: 0,
+    servingEquipment: 0,
   });
 
   // Load audit data when qaInputDate changes
@@ -827,39 +845,58 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
     }
 
     if (existingAudit) {
+      const k = existingAudit.kitchen || {} as any;
+      const b = existingAudit.bar || {} as any;
+      const s = existingAudit.service || {} as any;
+
       setQaKitchen({
-        product: Number(existingAudit.kitchen?.product) || 0,
-        cleanliness: Number(existingAudit.kitchen?.cleanliness) || 0,
-        grooming: Number(existingAudit.kitchen?.grooming) || 0
+        chemicalControl: Number(k.chemicalControl) || 0,
+        cleaningSanitation: Number(k.cleaningSanitation) || 0,
+        emergencySafety: Number(k.emergencySafety) || 0,
+        foodBeverageQuality: Number(k.foodBeverageQuality) || Number(k.product) || 0,
+        personalHygiene: Number(k.personalHygiene) || Number(k.grooming) || 0,
+        pestControl: Number(k.pestControl) || 0,
+        receivingStoragePrep: Number(k.receivingStoragePrep) || 0,
       });
+
       setQaBar({
-        product: Number(existingAudit.bar?.product) || 0,
-        cleanliness: Number(existingAudit.bar?.cleanliness) || 0,
-        grooming: Number(existingAudit.bar?.grooming) || 0
+        chemicalControl: Number(b.chemicalControl) || 0,
+        cleaningSanitation: Number(b.cleaningSanitation) || 0,
+        emergencySafety: Number(b.emergencySafety) || 0,
+        foodBeverageQuality: Number(b.foodBeverageQuality) || Number(b.product) || 0,
+        personalHygiene: Number(b.personalHygiene) || Number(b.grooming) || 0,
+        pestControl: Number(b.pestControl) || 0,
+        receivingStoragePrep: Number(b.receivingStoragePrep) || 0,
       });
+
       setQaService({
-        product: Number(existingAudit.service?.product) || 0,
-        cleanliness: Number(existingAudit.service?.cleanliness) || 0,
-        grooming: Number(existingAudit.service?.grooming) || 0
+        chemicalControl: Number(s.chemicalControl) || 0,
+        emergencySafety: Number(s.emergencySafety) || 0,
+        personalHygiene: Number(s.personalHygiene) || Number(s.grooming) || 0,
+        restaurantCleanliness: Number(s.restaurantCleanliness) || Number(s.cleanliness) || 0,
+        sequenceOfService: Number(s.sequenceOfService) || 0,
+        serviceHospitality: Number(s.serviceHospitality) || Number(s.product) || 0,
+        servingEquipment: Number(s.servingEquipment) || 0,
       });
       setIsEditingQA(true);
     } else {
-      setQaKitchen({ product: 0, cleanliness: 0, grooming: 0 });
-      setQaBar({ product: 0, cleanliness: 0, grooming: 0 });
-      setQaService({ product: 0, cleanliness: 0, grooming: 0 });
+      setQaKitchen({
+        chemicalControl: 0, cleaningSanitation: 0, emergencySafety: 0, foodBeverageQuality: 0, personalHygiene: 0, pestControl: 0, receivingStoragePrep: 0
+      });
+      setQaBar({
+        chemicalControl: 0, cleaningSanitation: 0, emergencySafety: 0, foodBeverageQuality: 0, personalHygiene: 0, pestControl: 0, receivingStoragePrep: 0
+      });
+      setQaService({
+        chemicalControl: 0, emergencySafety: 0, personalHygiene: 0, restaurantCleanliness: 0, sequenceOfService: 0, serviceHospitality: 0, servingEquipment: 0
+      });
       setIsEditingQA(false);
     }
   }, [qaInputDate, data.dailyQA, allMonthlyData]);
 
   // Live average calculations for active input form
-  const calcSectionAvg = (sec: { product: number; cleanliness: number; grooming: number }) => {
-    const vals = [Number(sec.product) || 0, Number(sec.cleanliness) || 0, Number(sec.grooming) || 0].filter(v => v > 0);
-    return vals.length === 0 ? 0 : Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2));
-  };
-
-  const liveKitchenAvg = useMemo(() => calcSectionAvg(qaKitchen), [qaKitchen]);
-  const liveBarAvg = useMemo(() => calcSectionAvg(qaBar), [qaBar]);
-  const liveServiceAvg = useMemo(() => calcSectionAvg(qaService), [qaService]);
+  const liveKitchenAvg = useMemo(() => calcQAScore(qaKitchen, QA_KITCHEN_SUBJECTS), [qaKitchen]);
+  const liveBarAvg = useMemo(() => calcQAScore(qaBar, QA_BAR_SUBJECTS), [qaBar]);
+  const liveServiceAvg = useMemo(() => calcQAScore(qaService, QA_SERVICE_SUBJECTS), [qaService]);
 
   const liveOutletAvg = useMemo(() => {
     const active = [liveKitchenAvg, liveBarAvg, liveServiceAvg].filter(v => v > 0);
@@ -920,14 +957,9 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
       }[] = [];
 
       Object.entries(auditsMap).forEach(([date, qa]) => {
-        const getSec = (sec?: any) => {
-          if (!sec) return 0;
-          const vals = [Number(sec.product) || 0, Number(sec.cleanliness) || 0, Number(sec.grooming) || 0].filter(v => v > 0);
-          return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-        };
-        const k = getSec(qa.kitchen);
-        const b = getSec(qa.bar);
-        const s = getSec(qa.service);
+        const k = calcQAScore(qa.kitchen, QA_KITCHEN_SUBJECTS);
+        const b = calcQAScore(qa.bar, QA_BAR_SUBJECTS);
+        const s = calcQAScore(qa.service, QA_SERVICE_SUBJECTS);
         if (k > 0 || b > 0 || s > 0) {
           const overall = (k + b + s) / 3;
           auditList.push({
@@ -1027,19 +1059,43 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
     setIsSavingQA(true);
     const newQaEntry: QAData = {
       kitchen: {
-        product: Math.min(100, Math.max(0, Number(qaKitchen.product) || 0)),
-        cleanliness: Math.min(100, Math.max(0, Number(qaKitchen.cleanliness) || 0)),
-        grooming: Math.min(100, Math.max(0, Number(qaKitchen.grooming) || 0))
+        chemicalControl: Math.min(100, Math.max(0, Number(qaKitchen.chemicalControl) || 0)),
+        cleaningSanitation: Math.min(100, Math.max(0, Number(qaKitchen.cleaningSanitation) || 0)),
+        emergencySafety: Math.min(100, Math.max(0, Number(qaKitchen.emergencySafety) || 0)),
+        foodBeverageQuality: Math.min(100, Math.max(0, Number(qaKitchen.foodBeverageQuality) || 0)),
+        personalHygiene: Math.min(100, Math.max(0, Number(qaKitchen.personalHygiene) || 0)),
+        pestControl: Math.min(100, Math.max(0, Number(qaKitchen.pestControl) || 0)),
+        receivingStoragePrep: Math.min(100, Math.max(0, Number(qaKitchen.receivingStoragePrep) || 0)),
+        // Legacy fallback fields for backward compatibility
+        product: liveKitchenAvg,
+        cleanliness: liveKitchenAvg,
+        grooming: liveKitchenAvg
       },
       bar: {
-        product: Math.min(100, Math.max(0, Number(qaBar.product) || 0)),
-        cleanliness: Math.min(100, Math.max(0, Number(qaBar.cleanliness) || 0)),
-        grooming: Math.min(100, Math.max(0, Number(qaBar.grooming) || 0))
+        chemicalControl: Math.min(100, Math.max(0, Number(qaBar.chemicalControl) || 0)),
+        cleaningSanitation: Math.min(100, Math.max(0, Number(qaBar.cleaningSanitation) || 0)),
+        emergencySafety: Math.min(100, Math.max(0, Number(qaBar.emergencySafety) || 0)),
+        foodBeverageQuality: Math.min(100, Math.max(0, Number(qaBar.foodBeverageQuality) || 0)),
+        personalHygiene: Math.min(100, Math.max(0, Number(qaBar.personalHygiene) || 0)),
+        pestControl: Math.min(100, Math.max(0, Number(qaBar.pestControl) || 0)),
+        receivingStoragePrep: Math.min(100, Math.max(0, Number(qaBar.receivingStoragePrep) || 0)),
+        // Legacy fallback fields for backward compatibility
+        product: liveBarAvg,
+        cleanliness: liveBarAvg,
+        grooming: liveBarAvg
       },
       service: {
-        product: Math.min(100, Math.max(0, Number(qaService.product) || 0)),
-        cleanliness: Math.min(100, Math.max(0, Number(qaService.cleanliness) || 0)),
-        grooming: Math.min(100, Math.max(0, Number(qaService.grooming) || 0))
+        chemicalControl: Math.min(100, Math.max(0, Number(qaService.chemicalControl) || 0)),
+        emergencySafety: Math.min(100, Math.max(0, Number(qaService.emergencySafety) || 0)),
+        personalHygiene: Math.min(100, Math.max(0, Number(qaService.personalHygiene) || 0)),
+        restaurantCleanliness: Math.min(100, Math.max(0, Number(qaService.restaurantCleanliness) || 0)),
+        sequenceOfService: Math.min(100, Math.max(0, Number(qaService.sequenceOfService) || 0)),
+        serviceHospitality: Math.min(100, Math.max(0, Number(qaService.serviceHospitality) || 0)),
+        servingEquipment: Math.min(100, Math.max(0, Number(qaService.servingEquipment) || 0)),
+        // Legacy fallback fields for backward compatibility
+        product: liveServiceAvg,
+        cleanliness: liveServiceAvg,
+        grooming: liveServiceAvg
       }
     };
 
@@ -1072,9 +1128,15 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
         delete next[targetDate];
         onUpdate('dailyQA', next, true);
         if (targetDate === qaInputDate) {
-          setQaKitchen({ product: 0, cleanliness: 0, grooming: 0 });
-          setQaBar({ product: 0, cleanliness: 0, grooming: 0 });
-          setQaService({ product: 0, cleanliness: 0, grooming: 0 });
+          setQaKitchen({
+            chemicalControl: 0, cleaningSanitation: 0, emergencySafety: 0, foodBeverageQuality: 0, personalHygiene: 0, pestControl: 0, receivingStoragePrep: 0
+          });
+          setQaBar({
+            chemicalControl: 0, cleaningSanitation: 0, emergencySafety: 0, foodBeverageQuality: 0, personalHygiene: 0, pestControl: 0, receivingStoragePrep: 0
+          });
+          setQaService({
+            chemicalControl: 0, emergencySafety: 0, personalHygiene: 0, restaurantCleanliness: 0, sequenceOfService: 0, serviceHospitality: 0, servingEquipment: 0
+          });
           setIsEditingQA(false);
         }
         setShowConfirm(null);
@@ -1086,17 +1148,17 @@ const AdminModule: React.FC<Props> = ({ data, onUpdate, onRestore, filters, onFi
   // Quick Preset Handlers
   const handleApplyQAPreset = (tier: 'EXCELLENT' | 'SATISFACTORY' | 'TO_IMPROVE') => {
     if (tier === 'EXCELLENT') {
-      setQaKitchen({ product: 95, cleanliness: 92, grooming: 94 });
-      setQaBar({ product: 94, cleanliness: 93, grooming: 95 });
-      setQaService({ product: 96, cleanliness: 94, grooming: 95 });
+      setQaKitchen({ chemicalControl: 95, cleaningSanitation: 94, emergencySafety: 93, foodBeverageQuality: 96, personalHygiene: 95, pestControl: 94, receivingStoragePrep: 95 });
+      setQaBar({ chemicalControl: 95, cleaningSanitation: 94, emergencySafety: 93, foodBeverageQuality: 96, personalHygiene: 95, pestControl: 94, receivingStoragePrep: 95 });
+      setQaService({ chemicalControl: 94, emergencySafety: 93, personalHygiene: 95, restaurantCleanliness: 96, sequenceOfService: 95, serviceHospitality: 96, servingEquipment: 95 });
     } else if (tier === 'SATISFACTORY') {
-      setQaKitchen({ product: 87, cleanliness: 86, grooming: 88 });
-      setQaBar({ product: 89, cleanliness: 85, grooming: 88 });
-      setQaService({ product: 88, cleanliness: 86, grooming: 90 });
+      setQaKitchen({ chemicalControl: 88, cleaningSanitation: 87, emergencySafety: 86, foodBeverageQuality: 89, personalHygiene: 88, pestControl: 86, receivingStoragePrep: 88 });
+      setQaBar({ chemicalControl: 88, cleaningSanitation: 87, emergencySafety: 86, foodBeverageQuality: 89, personalHygiene: 88, pestControl: 86, receivingStoragePrep: 88 });
+      setQaService({ chemicalControl: 87, emergencySafety: 86, personalHygiene: 88, restaurantCleanliness: 89, sequenceOfService: 88, serviceHospitality: 89, servingEquipment: 87 });
     } else {
-      setQaKitchen({ product: 78, cleanliness: 75, grooming: 80 });
-      setQaBar({ product: 80, cleanliness: 76, grooming: 79 });
-      setQaService({ product: 82, cleanliness: 78, grooming: 81 });
+      setQaKitchen({ chemicalControl: 78, cleaningSanitation: 76, emergencySafety: 75, foodBeverageQuality: 80, personalHygiene: 78, pestControl: 74, receivingStoragePrep: 77 });
+      setQaBar({ chemicalControl: 78, cleaningSanitation: 76, emergencySafety: 75, foodBeverageQuality: 80, personalHygiene: 78, pestControl: 74, receivingStoragePrep: 77 });
+      setQaService({ chemicalControl: 76, emergencySafety: 75, personalHygiene: 78, restaurantCleanliness: 80, sequenceOfService: 79, serviceHospitality: 81, servingEquipment: 77 });
     }
   };
 
@@ -1166,9 +1228,9 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
       });
 
       const rows = [
-        ['KITCHEN', 'Quality of Food / Cleanliness / Grooming', `${quarterlyQAData[0].kitchenMonthAvg}%`, `${quarterlyQAData[1].kitchenMonthAvg}%`, `${quarterlyQAData[2].kitchenMonthAvg}%`, `${quarterlySummary.kitchen3MonthAvg}%`, quarterlySummary.kitchenTier.label],
-        ['BAR', 'Quality of Beverage / Cleanliness / Grooming', `${quarterlyQAData[0].barMonthAvg}%`, `${quarterlyQAData[1].barMonthAvg}%`, `${quarterlyQAData[2].barMonthAvg}%`, `${quarterlySummary.bar3MonthAvg}%`, quarterlySummary.barTier.label],
-        ['SERVICE', 'Quality of Service / Cleanliness / Grooming', `${quarterlyQAData[0].serviceMonthAvg}%`, `${quarterlyQAData[1].serviceMonthAvg}%`, `${quarterlyQAData[2].serviceMonthAvg}%`, `${quarterlySummary.service3MonthAvg}%`, quarterlySummary.serviceTier.label],
+        ['KITCHEN', '7 Parameter: Chemical Control, Cleaning & Sanitation, Safety, F&B Quality Check, Personal Hygiene, Pest Control, Storage/Prep', `${quarterlyQAData[0].kitchenMonthAvg}%`, `${quarterlyQAData[1].kitchenMonthAvg}%`, `${quarterlyQAData[2].kitchenMonthAvg}%`, `${quarterlySummary.kitchen3MonthAvg}%`, quarterlySummary.kitchenTier.label],
+        ['BAR', '7 Parameter: Chemical Control, Cleaning & Sanitation, Safety, F&B Quality Check, Personal Hygiene, Pest Control, Storage/Prep', `${quarterlyQAData[0].barMonthAvg}%`, `${quarterlyQAData[1].barMonthAvg}%`, `${quarterlyQAData[2].barMonthAvg}%`, `${quarterlySummary.bar3MonthAvg}%`, quarterlySummary.barTier.label],
+        ['SERVICE', '7 Parameter: Chemical Control, Emergency & Safety, Personal Hygiene, Restaurant Cleanliness, Sequence of Service, Service & Hospitality, Serving Equipment', `${quarterlyQAData[0].serviceMonthAvg}%`, `${quarterlyQAData[1].serviceMonthAvg}%`, `${quarterlyQAData[2].serviceMonthAvg}%`, `${quarterlySummary.service3MonthAvg}%`, quarterlySummary.serviceTier.label],
         ['TOTAL / RATA-RATA 3 DIVISI', 'Rata-rata Akumulasi 3 Divisi', `${quarterlyQAData[0].overallMonthAvg}%`, `${quarterlyQAData[1].overallMonthAvg}%`, `${quarterlyQAData[2].overallMonthAvg}%`, `${quarterlySummary.overall3MonthAvg}%`, `${quarterlySummary.overallTier.label} (${quarterlySummary.overallTier.range})`]
       ];
 
@@ -1515,7 +1577,7 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
                   </div>
                   KITCHEN
                 </td>
-                <td className="p-4 text-slate-400 text-[11px]">Quality Food, Cleanliness, Grooming</td>
+                <td className="p-4 text-slate-400 text-[11px]">7 Parameter: Chemical Control, Sanitation, Safety, F&B Quality, Hygiene, Pest, Storage/Prep</td>
                 {quarterlyQAData.map(m => (
                   <td key={m.monthIdx} className="p-4 text-center font-black text-white">
                     {m.kitchenMonthAvg > 0 ? `${m.kitchenMonthAvg}%` : <span className="text-slate-600">-</span>}
@@ -1539,7 +1601,7 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
                   </div>
                   BAR
                 </td>
-                <td className="p-4 text-slate-400 text-[11px]">Quality Beverage, Cleanliness, Grooming</td>
+                <td className="p-4 text-slate-400 text-[11px]">7 Parameter: Chemical Control, Sanitation, Safety, F&B Quality, Hygiene, Pest, Storage/Prep</td>
                 {quarterlyQAData.map(m => (
                   <td key={m.monthIdx} className="p-4 text-center font-black text-white">
                     {m.barMonthAvg > 0 ? `${m.barMonthAvg}%` : <span className="text-slate-600">-</span>}
@@ -1563,7 +1625,7 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
                   </div>
                   SERVICE
                 </td>
-                <td className="p-4 text-slate-400 text-[11px]">Quality Service, Cleanliness, Grooming</td>
+                <td className="p-4 text-slate-400 text-[11px]">7 Parameter: Chemical, Safety, Hygiene, Cleanliness, Sequence, Hospitality, Serving Equip</td>
                 {quarterlyQAData.map(m => (
                   <td key={m.monthIdx} className="p-4 text-center font-black text-white">
                     {m.serviceMonthAvg > 0 ? `${m.serviceMonthAvg}%` : <span className="text-slate-600">-</span>}
@@ -1669,9 +1731,42 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
             <button
               type="button"
               onClick={() => {
-                setQaKitchen({ product: 0, cleanliness: 0, grooming: 0 });
-                setQaBar({ product: 0, cleanliness: 0, grooming: 0 });
-                setQaService({ product: 0, cleanliness: 0, grooming: 0 });
+                setQaKitchen({
+                  chemicalControl: 0,
+                  cleaningSanitation: 0,
+                  emergencySafety: 0,
+                  foodBeverageQuality: 0,
+                  personalHygiene: 0,
+                  pestControl: 0,
+                  receivingStoragePrep: 0,
+                  product: 0,
+                  cleanliness: 0,
+                  grooming: 0
+                });
+                setQaBar({
+                  chemicalControl: 0,
+                  cleaningSanitation: 0,
+                  emergencySafety: 0,
+                  foodBeverageQuality: 0,
+                  personalHygiene: 0,
+                  pestControl: 0,
+                  receivingStoragePrep: 0,
+                  product: 0,
+                  cleanliness: 0,
+                  grooming: 0
+                });
+                setQaService({
+                  chemicalControl: 0,
+                  emergencySafety: 0,
+                  personalHygiene: 0,
+                  restaurantCleanliness: 0,
+                  sequenceOfService: 0,
+                  serviceHospitality: 0,
+                  servingEquipment: 0,
+                  product: 0,
+                  cleanliness: 0,
+                  grooming: 0
+                });
               }}
               className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase tracking-wider transition-all"
             >
@@ -1680,91 +1775,55 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
           </div>
         </div>
 
-        {/* 3 Division Input Columns */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
+        {/* 3 Division Input Columns (7 Subjects Each) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
           {/* 1. KITCHEN INPUT */}
-          <div className="glass-card p-6 bg-slate-950/50 border-t-4 border-purple-500 rounded-2xl space-y-4">
+          <div className="glass-card p-5 bg-slate-950/60 border-t-4 border-purple-500 rounded-2xl space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-white/5">
-              <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <i className="fas fa-utensils text-purple-400"></i> Divisi Kitchen
-              </h5>
+              <div>
+                <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <i className="fas fa-utensils text-purple-400"></i> Divisi Kitchen
+                </h5>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                  {QA_KITCHEN_SUBJECTS.length} Kriteria Penilaian
+                </span>
+              </div>
               <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${getQaScoreTier(liveKitchenAvg).badgeClass}`}>
                 {getQaScoreTier(liveKitchenAvg).label}
               </span>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Quality Food</span>
-                  <span className="text-white font-mono">{qaKitchen.product}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.product}
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, product: Number(e.target.value) })}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.product || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, product: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-purple-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Cleanliness</span>
-                  <span className="text-white font-mono">{qaKitchen.cleanliness}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.cleanliness}
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, cleanliness: Number(e.target.value) })}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.cleanliness || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, cleanliness: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-purple-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Grooming</span>
-                  <span className="text-white font-mono">{qaKitchen.grooming}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.grooming}
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, grooming: Number(e.target.value) })}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaKitchen.grooming || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaKitchen({ ...qaKitchen, grooming: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-purple-500"
-                />
-              </div>
+            <div className="space-y-3">
+              {QA_KITCHEN_SUBJECTS.map((item) => {
+                const val = (qaKitchen as any)[item.id] ?? 0;
+                return (
+                  <div key={item.id} className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-300">
+                      <span className="truncate pr-2" title={item.label}>{item.label}</span>
+                      <span className="text-purple-400 font-mono font-black shrink-0">{val}%</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={val}
+                        onChange={(e) => setQaKitchen(prev => ({ ...prev, [item.id]: Number(e.target.value) }))}
+                        className="w-full accent-purple-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={val === 0 ? '' : val}
+                        placeholder="0"
+                        onChange={(e) => setQaKitchen(prev => ({ ...prev, [item.id]: Math.min(100, Math.max(0, Number(e.target.value))) }))}
+                        className="w-16 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-xs font-mono font-black text-center text-white outline-none focus:ring-1 ring-purple-500 shrink-0"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs">
@@ -1774,88 +1833,52 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
           </div>
 
           {/* 2. BAR INPUT */}
-          <div className="glass-card p-6 bg-slate-950/50 border-t-4 border-emerald-500 rounded-2xl space-y-4">
+          <div className="glass-card p-5 bg-slate-950/60 border-t-4 border-emerald-500 rounded-2xl space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-white/5">
-              <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <i className="fas fa-glass-martini-alt text-emerald-400"></i> Divisi Bar
-              </h5>
+              <div>
+                <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <i className="fas fa-glass-martini-alt text-emerald-400"></i> Divisi Bar
+                </h5>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                  {QA_BAR_SUBJECTS.length} Kriteria Penilaian
+                </span>
+              </div>
               <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${getQaScoreTier(liveBarAvg).badgeClass}`}>
                 {getQaScoreTier(liveBarAvg).label}
               </span>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Quality Beverage</span>
-                  <span className="text-white font-mono">{qaBar.product}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaBar.product}
-                  onChange={(e) => setQaBar({ ...qaBar, product: Number(e.target.value) })}
-                  className="w-full accent-emerald-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaBar.product || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaBar({ ...qaBar, product: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Cleanliness</span>
-                  <span className="text-white font-mono">{qaBar.cleanliness}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaBar.cleanliness}
-                  onChange={(e) => setQaBar({ ...qaBar, cleanliness: Number(e.target.value) })}
-                  className="w-full accent-emerald-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaBar.cleanliness || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaBar({ ...qaBar, cleanliness: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Grooming</span>
-                  <span className="text-white font-mono">{qaBar.grooming}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaBar.grooming}
-                  onChange={(e) => setQaBar({ ...qaBar, grooming: Number(e.target.value) })}
-                  className="w-full accent-emerald-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaBar.grooming || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaBar({ ...qaBar, grooming: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-emerald-500"
-                />
-              </div>
+            <div className="space-y-3">
+              {QA_BAR_SUBJECTS.map((item) => {
+                const val = (qaBar as any)[item.id] ?? 0;
+                return (
+                  <div key={item.id} className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-300">
+                      <span className="truncate pr-2" title={item.label}>{item.label}</span>
+                      <span className="text-emerald-400 font-mono font-black shrink-0">{val}%</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={val}
+                        onChange={(e) => setQaBar(prev => ({ ...prev, [item.id]: Number(e.target.value) }))}
+                        className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={val === 0 ? '' : val}
+                        placeholder="0"
+                        onChange={(e) => setQaBar(prev => ({ ...prev, [item.id]: Math.min(100, Math.max(0, Number(e.target.value))) }))}
+                        className="w-16 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-xs font-mono font-black text-center text-white outline-none focus:ring-1 ring-emerald-500 shrink-0"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs">
@@ -1865,88 +1888,52 @@ _Dibuat otomatis dari Sistem Admin Panel QA Audit_`;
           </div>
 
           {/* 3. SERVICE INPUT */}
-          <div className="glass-card p-6 bg-slate-950/50 border-t-4 border-blue-500 rounded-2xl space-y-4">
+          <div className="glass-card p-5 bg-slate-950/60 border-t-4 border-blue-500 rounded-2xl space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-white/5">
-              <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <i className="fas fa-concierge-bell text-blue-400"></i> Divisi Service
-              </h5>
+              <div>
+                <h5 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <i className="fas fa-concierge-bell text-blue-400"></i> Divisi Service
+                </h5>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                  {QA_SERVICE_SUBJECTS.length} Kriteria Penilaian
+                </span>
+              </div>
               <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${getQaScoreTier(liveServiceAvg).badgeClass}`}>
                 {getQaScoreTier(liveServiceAvg).label}
               </span>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Quality Service</span>
-                  <span className="text-white font-mono">{qaService.product}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaService.product}
-                  onChange={(e) => setQaService({ ...qaService, product: Number(e.target.value) })}
-                  className="w-full accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaService.product || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaService({ ...qaService, product: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Cleanliness</span>
-                  <span className="text-white font-mono">{qaService.cleanliness}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaService.cleanliness}
-                  onChange={(e) => setQaService({ ...qaService, cleanliness: Number(e.target.value) })}
-                  className="w-full accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaService.cleanliness || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaService({ ...qaService, cleanliness: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                  <span>Grooming</span>
-                  <span className="text-white font-mono">{qaService.grooming}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={qaService.grooming}
-                  onChange={(e) => setQaService({ ...qaService, grooming: Number(e.target.value) })}
-                  className="w-full accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={qaService.grooming || ''}
-                  placeholder="0"
-                  onChange={(e) => setQaService({ ...qaService, grooming: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="w-full mt-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-black text-white outline-none focus:ring-1 ring-blue-500"
-                />
-              </div>
+            <div className="space-y-3">
+              {QA_SERVICE_SUBJECTS.map((item) => {
+                const val = (qaService as any)[item.id] ?? 0;
+                return (
+                  <div key={item.id} className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-300">
+                      <span className="truncate pr-2" title={item.label}>{item.label}</span>
+                      <span className="text-blue-400 font-mono font-black shrink-0">{val}%</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={val}
+                        onChange={(e) => setQaService(prev => ({ ...prev, [item.id]: Number(e.target.value) }))}
+                        className="w-full accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={val === 0 ? '' : val}
+                        placeholder="0"
+                        onChange={(e) => setQaService(prev => ({ ...prev, [item.id]: Math.min(100, Math.max(0, Number(e.target.value))) }))}
+                        className="w-16 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-xs font-mono font-black text-center text-white outline-none focus:ring-1 ring-blue-500 shrink-0"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs">

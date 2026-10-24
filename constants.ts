@@ -477,6 +477,57 @@ export const getQaScoreTier = (score: number) => {
   };
 };
 
+export const QA_SERVICE_SUBJECTS = [
+  { id: 'chemicalControl', label: 'CHEMICAL CONTROL', shortLabel: 'Chemical Control' },
+  { id: 'emergencySafety', label: 'EMERGENCY & SAFETY FACILITIES', shortLabel: 'Emergency & Safety' },
+  { id: 'personalHygiene', label: 'PERSONAL HYGIENE', shortLabel: 'Personal Hygiene' },
+  { id: 'restaurantCleanliness', label: 'RESTAURANT CLEANLINESS', shortLabel: 'Restaurant Cleanliness' },
+  { id: 'sequenceOfService', label: 'SEQUENCE OF SERVICE', shortLabel: 'Sequence of Service' },
+  { id: 'serviceHospitality', label: 'SERVICE & HOSPITALITY', shortLabel: 'Service & Hospitality' },
+  { id: 'servingEquipment', label: 'SERVING EQUIPMENT PROPERNESS', shortLabel: 'Serving Equipment' },
+] as const;
+
+export const QA_KITCHEN_SUBJECTS = [
+  { id: 'chemicalControl', label: 'CHEMICAL CONTROL', shortLabel: 'Chemical Control' },
+  { id: 'cleaningSanitation', label: 'CLEANING AND SANITATION', shortLabel: 'Cleaning & Sanitation' },
+  { id: 'emergencySafety', label: 'EMERGENCY & SAFETY FACILITIES', shortLabel: 'Emergency & Safety' },
+  { id: 'foodBeverageQuality', label: 'FOOD AND BEVERAGE QUALITY CHECK UNTUK INTERNAL QA', shortLabel: 'F&B Quality Check' },
+  { id: 'personalHygiene', label: 'PERSONAL HYGIENE', shortLabel: 'Personal Hygiene' },
+  { id: 'pestControl', label: 'PEST CONTROL', shortLabel: 'Pest Control' },
+  { id: 'receivingStoragePrep', label: 'RECEIVING, STORAGE, PREPARATION, PROCESSING, SERVING', shortLabel: 'Receiving, Storage & Prep' },
+] as const;
+
+export const QA_BAR_SUBJECTS = [
+  { id: 'chemicalControl', label: 'CHEMICAL CONTROL', shortLabel: 'Chemical Control' },
+  { id: 'cleaningSanitation', label: 'CLEANING AND SANITATION', shortLabel: 'Cleaning & Sanitation' },
+  { id: 'emergencySafety', label: 'EMERGENCY & SAFETY FACILITIES', shortLabel: 'Emergency & Safety' },
+  { id: 'foodBeverageQuality', label: 'FOOD AND BEVERAGE QUALITY CHECK UNTUK INTERNAL QA', shortLabel: 'F&B Quality Check' },
+  { id: 'personalHygiene', label: 'PERSONAL HYGIENE', shortLabel: 'Personal Hygiene' },
+  { id: 'pestControl', label: 'PEST CONTROL', shortLabel: 'Pest Control' },
+  { id: 'receivingStoragePrep', label: 'RECEIVING, STORAGE, PREPARATION, PROCESSING, SERVING', shortLabel: 'Receiving, Storage & Prep' },
+] as const;
+
+export const calcQAScore = (sec: any, subjects?: readonly { id: string }[]): number => {
+  if (!sec || typeof sec !== 'object') return 0;
+  if (subjects && subjects.length > 0) {
+    const vals = subjects.map(s => Number(sec[s.id])).filter(v => !isNaN(v) && v > 0);
+    if (vals.length > 0) {
+      return Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2));
+    }
+  }
+  const candidateKeys = [
+    'chemicalControl', 'cleaningSanitation', 'emergencySafety', 'foodBeverageQuality',
+    'personalHygiene', 'pestControl', 'receivingStoragePrep', 'restaurantCleanliness',
+    'sequenceOfService', 'serviceHospitality', 'servingEquipment'
+  ];
+  const newVals = candidateKeys.map(k => Number(sec[k])).filter(v => !isNaN(v) && v > 0);
+  if (newVals.length > 0) {
+    return Number((newVals.reduce((a, b) => a + b, 0) / newVals.length).toFixed(2));
+  }
+  const legacyVals = [Number(sec.product) || 0, Number(sec.cleanliness) || 0, Number(sec.grooming) || 0].filter(v => v > 0);
+  return legacyVals.length > 0 ? Number((legacyVals.reduce((a, b) => a + b, 0) / legacyVals.length).toFixed(2)) : 0;
+};
+
 export const OT_RATE = 15000;
 export const DEFAULT_OT_BUDGET_HOURS = 35;
 export const DEFAULT_OT_RATE = 15000;

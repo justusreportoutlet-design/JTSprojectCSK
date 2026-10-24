@@ -448,16 +448,70 @@ export interface BreakTimeEntry {
   notes?: string;
 }
 
+export interface QAServiceSection {
+  chemicalControl?: number;
+  emergencySafety?: number;
+  personalHygiene?: number;
+  restaurantCleanliness?: number;
+  sequenceOfService?: number;
+  serviceHospitality?: number;
+  servingEquipment?: number;
+  product?: number;
+  cleanliness?: number;
+  grooming?: number;
+  [key: string]: number | undefined;
+}
+
+export interface QAKitchenSection {
+  chemicalControl?: number;
+  cleaningSanitation?: number;
+  emergencySafety?: number;
+  foodBeverageQuality?: number;
+  personalHygiene?: number;
+  pestControl?: number;
+  receivingStoragePrep?: number;
+  product?: number;
+  cleanliness?: number;
+  grooming?: number;
+  [key: string]: number | undefined;
+}
+
+export interface QABarSection {
+  chemicalControl?: number;
+  cleaningSanitation?: number;
+  emergencySafety?: number;
+  foodBeverageQuality?: number;
+  personalHygiene?: number;
+  pestControl?: number;
+  receivingStoragePrep?: number;
+  product?: number;
+  cleanliness?: number;
+  grooming?: number;
+  [key: string]: number | undefined;
+}
+
 export interface QASection {
-  product: number;
-  cleanliness: number;
-  grooming: number;
+  product?: number;
+  cleanliness?: number;
+  grooming?: number;
+  chemicalControl?: number;
+  emergencySafety?: number;
+  personalHygiene?: number;
+  restaurantCleanliness?: number;
+  sequenceOfService?: number;
+  serviceHospitality?: number;
+  servingEquipment?: number;
+  cleaningSanitation?: number;
+  foodBeverageQuality?: number;
+  pestControl?: number;
+  receivingStoragePrep?: number;
+  [key: string]: number | undefined;
 }
 
 export interface QAData {
-  kitchen: QASection;
-  bar: QASection;
-  service: QASection;
+  kitchen: QAKitchenSection | QASection;
+  bar: QABarSection | QASection;
+  service: QAServiceSection | QASection;
 }
 
 export interface ExpenseData {
