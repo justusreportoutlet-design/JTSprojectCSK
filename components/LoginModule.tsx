@@ -43,64 +43,54 @@ const LoginModule: React.FC<Props> = ({ onLogin, onPublicView, isFullScreen, onT
 
   const [selectedOutlet, setSelectedOutlet] = useState<Outlet | ''>(savedOutlet);
   const [emailInput, setEmailInput] = useState<string>(() => savedEmail || '');
-  const [useEmailLogin, setUseEmailLogin] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
+      if (user && user.email) {
+        setEmailInput(user.email);
+        safeStorage.setItem('MANUAL_USER_EMAIL', user.email);
+        safeStorage.setItem('BARN_USER_SESSION', user.email);
+      }
     });
     return unsub;
   }, []);
 
-  const manualEmail = safeStorage.getItem('MANUAL_USER_EMAIL') || '';
-  const resolvedEmail = (firebaseUser && firebaseUser.email) || (firebaseUser && firebaseUser.isAnonymous ? manualEmail : null);
+  const manualEmail = safeStorage.getItem('MANUAL_USER_EMAIL') || emailInput || '';
+  const activeSessionEmail = (firebaseUser && firebaseUser.email) || manualEmail || '';
 
-  const handleQuickLogin = async () => {
+  const handleLoginSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!selectedOutlet) {
       showToast?.('Silakan pilih outlet terlebih dahulu.', 'error');
       return;
     }
-    if (resolvedEmail) {
-      setLoading(true);
-      try {
-        if (!auth.currentUser) {
-          const { signInAnonymously } = await import('firebase/auth');
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.warn('[QuickLogin] Auth ensure notice:', err);
-      }
-      safeStorage.setItem('BARN_SELECTED_OUTLET', selectedOutlet);
-      onLogin(resolvedEmail, selectedOutlet as Outlet);
-    }
-  };
-
-  const handleManualEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedOutlet) {
-      showToast?.('Silakan pilih outlet terlebih dahulu.', 'error');
-      return;
-    }
-    const cleanEmail = (emailInput.trim() || savedEmail || '').toLowerCase();
+    const cleanEmail = (emailInput.trim() || activeSessionEmail || '').toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      showToast?.('Masukkan email yang valid.', 'error');
+      showToast?.('Silakan masukkan alamat email yang valid.', 'error');
       return;
     }
 
     setLoading(true);
+
     try {
       if (!auth.currentUser) {
         const { signInAnonymously } = await import('firebase/auth');
-        await signInAnonymously(auth);
+        await Promise.race([
+          signInAnonymously(auth),
+          new Promise(res => setTimeout(res, 2000))
+        ]);
       }
     } catch (err) {
-      console.warn('[ManualLogin] Auth anonymous notice:', err);
+      console.warn('[LoginModule] Auth anonymous notice:', err);
     }
 
     safeStorage.setItem('MANUAL_USER_EMAIL', cleanEmail);
     safeStorage.setItem('BARN_USER_SESSION', cleanEmail);
     safeStorage.setItem('BARN_SELECTED_OUTLET', selectedOutlet);
+
+    showToast?.(`Masuk sebagai ${cleanEmail} di ${selectedOutlet}`, 'success');
     onLogin(cleanEmail, selectedOutlet as Outlet);
     setLoading(false);
   };
@@ -114,48 +104,66 @@ const LoginModule: React.FC<Props> = ({ onLogin, onPublicView, isFullScreen, onT
       
       const result = await signInWithPopup(auth, provider);
       if (result.user.email) {
-        showToast?.('Berhasil masuk via Google. Silakan pilih outlet untuk melanjutkan.', 'success');
+        const userEmail = result.user.email.toLowerCase();
+        setEmailInput(userEmail);
+        safeStorage.setItem('MANUAL_USER_EMAIL', userEmail);
+        safeStorage.setItem('BARN_USER_SESSION', userEmail);
+        
+        if (selectedOutlet) {
+          safeStorage.setItem('BARN_SELECTED_OUTLET', selectedOutlet);
+          showToast?.(`Login Google berhasil! Membuka ${selectedOutlet}...`, 'success');
+          onLogin(userEmail, selectedOutlet as Outlet);
+          return;
+        } else {
+          showToast?.('Berhasil masuk via Google! Silakan pilih outlet Anda untuk melanjutkan.', 'success');
+        }
       }
     } catch (error: any) {
       const errorCode = error.code || (error.message && error.message.includes('popup-closed-by-user') ? 'auth/popup-closed-by-user' : '');
       
-      // Expected user actions or browser popup restrictions - do not treat as fatal console.error
       if (errorCode === 'auth/popup-closed-by-user' || errorCode === 'auth/cancelled-popup-request') {
-        showToast?.('Login dibatalkan atau jendela ditutup.', 'info');
+        showToast?.('Jendela login Google ditutup. Anda juga bisa langsung memasukkan email di bawah.', 'info');
         setLoading(false);
-        setNetworkError(true);
         return;
       }
 
       if (errorCode === 'auth/popup-blocked') {
         console.warn('[Auth] Google popup was blocked by browser or iframe security policy:', error);
         setNetworkError(true);
-        setUseEmailLogin(true);
-        showToast?.('Popup login Google diblokir oleh browser / batasan Iframe. Silakan login langsung menggunakan Email & Outlet di bawah atau buka Tab Baru.', 'info');
+        showToast?.('Popup login Google diblokir browser. Silakan masukkan email Anda langsung pada formulir di bawah.', 'info');
         setLoading(false);
         return;
       }
 
-      console.warn('[Auth] Login attempt notice:', error);
-      
-      let message = 'Gagal masuk: ' + (error.message || 'Terjadi kesalahan.');
+      console.warn('[Auth] Login notice:', error);
       
       if (errorCode === 'auth/network-request-failed') {
         setNetworkError(true);
-        setUseEmailLogin(true);
-        message = 'Koneksi ke Google terhalang dalam Iframe. Silakan gunakan Login Email & Outlet di bawah ini atau buka di Tab Baru.';
-        showToast?.(message, 'info');
-      } else if (errorCode === 'auth/internal-error' && error.message?.includes('assertion failed')) {
-        message = 'Terjadi kesalahan internal sistem login. Silakan refresh halaman dan coba lagi.';
-        showToast?.(message, 'error');
+        showToast?.('Koneksi Google terhalang iframe. Silakan login langsung menggunakan Email di bawah.', 'info');
       } else {
-        showToast?.(message, 'error');
+        showToast?.('Gagal masuk via Google. Silakan gunakan formulir Email & Outlet di bawah.', 'error');
       }
     } finally {
       setTimeout(() => {
         setLoading(false);
       }, 300);
     }
+  };
+
+  const handleResetSession = async () => {
+    try {
+      const { signOut } = await import('firebase/auth');
+      await signOut(auth);
+    } catch (e) {
+      // ignore
+    }
+    safeStorage.removeItem('MANUAL_USER_EMAIL');
+    safeStorage.removeItem('BARN_SELECTED_OUTLET');
+    safeStorage.removeItem('BARN_USER_SESSION');
+    setFirebaseUser(null);
+    setEmailInput('');
+    setSelectedOutlet('');
+    showToast?.('Sesi telah direset. Silakan login kembali dengan akun baru.', 'info');
   };
 
   return (
@@ -205,317 +213,170 @@ const LoginModule: React.FC<Props> = ({ onLogin, onPublicView, isFullScreen, onT
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px]"></div>
       </div>
 
-      <div className="glass-card max-w-md w-full p-6 sm:p-10 border-white/10 shadow-2xl relative animate-fade-in mx-auto my-auto">
-        <div className="text-center mb-8 sm:mb-10">
-          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl sm:rounded-3xl mx-auto flex items-center justify-center mb-4 sm:mb-6 shadow-2xl shadow-purple-500/20 transform rotate-12">
+      <div className="glass-card max-w-md w-full p-6 sm:p-8 border-white/10 shadow-2xl relative animate-fade-in mx-auto my-auto">
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl sm:rounded-3xl mx-auto flex items-center justify-center mb-3 sm:mb-4 shadow-2xl shadow-purple-500/20 transform rotate-12">
             <i className="fas fa-server text-2xl sm:text-3xl text-white"></i>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tighter mb-2">DAILY REPORT REVENUE</h1>
+          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tighter mb-1">DAILY REPORT REVENUE</h1>
           <p className="text-slate-500 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em]">Multi-User Performance Suite</p>
-          <div className="mt-4 sm:mt-6 py-1.5 sm:py-2 px-3 sm:px-4 bg-indigo-500/10 border border-indigo-500/20 rounded-full inline-block">
+          <div className="mt-3 py-1 px-3 bg-indigo-500/10 border border-indigo-500/20 rounded-full inline-block">
             <p className="text-indigo-400 text-[8px] sm:text-[9px] font-black uppercase tracking-[0.4em]">SUPPORT BY CHRISTIAN</p>
           </div>
         </div>
 
-        <div className="space-y-6">
-          {!resolvedEmail ? (
-            <div className="text-center space-y-2 animate-fade-in">
-              <h2 className="text-white font-bold text-lg">Silakan Masuk</h2>
-              <p className="text-slate-400 text-xs">Pilih outlet dan masuk menggunakan akun Google atau email Anda.</p>
-            </div>
-          ) : (
-            <div className="text-center space-y-2 animate-fade-in">
-              <h2 className="text-white font-bold text-lg">Selamat Datang</h2>
-              <p className="text-slate-400 text-xs">Pilih outlet untuk masuk atau buka Halaman Regional.</p>
-            </div>
-          )}
-
-          {resolvedEmail ? (
-            <div className="space-y-6 animate-fade-in">
-              <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-center">
-                <div className="flex justify-center mb-1">
-                  <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold scale-110">
-                    <i className="fas fa-user-check text-sm"></i>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">Sesi Aktif Terdeteksi</p>
-                  <p className="text-white text-sm font-black tracking-tight select-all truncate max-w-full px-2 py-1 bg-slate-950/30 rounded-lg">{resolvedEmail}</p>
-                </div>
+        {/* Active Session Badge if detected */}
+        {activeSessionEmail && (
+          <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between gap-3 text-left">
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 flex-shrink-0">
+                <i className="fas fa-user-check text-xs"></i>
               </div>
+              <div className="overflow-hidden">
+                <p className="text-slate-400 text-[9px] font-black uppercase tracking-wider">Sesi Terdeteksi</p>
+                <p className="text-white text-xs font-bold truncate max-w-[190px]">{activeSessionEmail}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetSession}
+              title="Ganti akun atau reset sesi"
+              className="text-[9px] font-black text-slate-400 hover:text-red-400 uppercase tracking-wider px-2 py-1 bg-slate-800/80 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer border border-white/5 flex-shrink-0"
+            >
+              Ganti Akun
+            </button>
+          </div>
+        )}
 
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Pilih Outlet</label>
-                <select 
-                  value={selectedOutlet}
-                  onChange={(e) => setSelectedOutlet(e.target.value as Outlet)}
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans"
-                >
-                  <option value="">-- Pilih Outlet --</option>
-                  {(Object.entries(groupedOutlets) as [string, OutletConfig[]][]).map(([area, list]) => (
-                    <optgroup key={area} label={`📍 ${area}`} className="bg-slate-950 text-indigo-400 font-black">
-                      {list.map(cfg => (
-                        <option key={cfg.name} value={cfg.name} className="bg-slate-900 text-white font-bold">
-                          {cfg.name}
-                        </option>
-                      ))}
-                    </optgroup>
+        {/* Login Form */}
+        <form onSubmit={handleLoginSubmit} className="space-y-4 text-left">
+          {/* 1. Pilih Outlet */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-1 flex items-center justify-between">
+              <span>1. Pilih Outlet *</span>
+              {selectedOutlet && (
+                <span className="text-emerald-400 font-bold lowercase tracking-normal text-[10px]">
+                  ✓ {selectedOutlet}
+                </span>
+              )}
+            </label>
+            <select 
+              value={selectedOutlet}
+              onChange={(e) => setSelectedOutlet(e.target.value as Outlet)}
+              className="w-full bg-slate-900 border border-white/10 rounded-2xl p-3.5 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans cursor-pointer"
+              required
+            >
+              <option value="">-- Pilih Outlet Anda --</option>
+              {(Object.entries(groupedOutlets) as [string, OutletConfig[]][]).map(([area, list]) => (
+                <optgroup key={area} label={`📍 ${area}`} className="bg-slate-950 text-indigo-400 font-black">
+                  {list.map(cfg => (
+                    <option key={cfg.name} value={cfg.name} className="bg-slate-900 text-white font-bold">
+                      {cfg.name}
+                    </option>
                   ))}
-                </select>
-              </div>
+                </optgroup>
+              ))}
+            </select>
+          </div>
 
-              <button 
-                onClick={handleQuickLogin}
-                disabled={loading}
-                className="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:text-slate-500 text-white font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 border border-white/10"
-              >
-                {loading ? (
-                  <>
-                    <i className="fas fa-circle-notch fa-spin"></i>
-                    MEMPROSES DATA...
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-sign-in-alt text-xs"></i>
-                    MASUK KE: {selectedOutlet || 'PILIH OUTLET'}
-                  </>
-                )}
-              </button>
-
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                  <div className="w-full border-t border-white/5"></div>
-                </div>
-                <div className="relative flex justify-center text-[8px] uppercase tracking-widest font-black">
-                  <span className="bg-[#1e293b] px-3 text-slate-500 font-black">HALAMAN REGIONAL</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2.5">
-                <button 
-                  onClick={() => onPublicView?.(ModuleType.REGIONAL_REPORT)}
-                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 border border-white/10"
-                >
-                  <i className="fas fa-chart-line text-xs"></i>
-                  Laporan Regional (All Divisions & Outlets)
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowOutletControlModal(true)}
-                  className="w-full py-3.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 font-black text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 active:scale-95 border border-amber-500/30 shadow-md"
-                >
-                  <i className="fas fa-store-alt text-amber-400"></i>
-                  Outlet Control (Kelola Outlet & Promo)
-                </button>
-              </div>
-
-              <div className="relative my-2">
-                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                  <div className="w-full border-t border-white/5"></div>
-                </div>
-                <div className="relative flex justify-center text-[7px] uppercase tracking-widest font-black">
-                  <span className="bg-[#1e293b] px-2 text-slate-500">PILIHAN AKUN LAIN</span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const { signOut } = await import('firebase/auth');
-                    await signOut(auth);
-                    safeStorage.removeItem('MANUAL_USER_EMAIL');
-                    safeStorage.removeItem('BARN_SELECTED_OUTLET');
-                    safeStorage.removeItem('BARN_USER_SESSION');
-                    setFirebaseUser(null);
-                    setUseEmailLogin(false);
-                    showToast?.('Sesi telah direset. Silakan login kembali.', 'info');
-                  }}
-                  className="py-3 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-[8px] uppercase tracking-wider transition-all active:scale-95 border border-white/10 flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <i className="fas fa-sign-out-alt text-red-400"></i> KELUAR SESI
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const { signOut } = await import('firebase/auth');
-                    await signOut(auth);
-                    safeStorage.removeItem('MANUAL_USER_EMAIL');
-                    safeStorage.removeItem('BARN_SELECTED_OUTLET');
-                    safeStorage.removeItem('BARN_USER_SESSION');
-                    setFirebaseUser(null);
-                    setUseEmailLogin(true);
-                  }}
-                  className="py-3 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-[8px] uppercase tracking-wider transition-all active:scale-95 border border-white/10 flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <i className="fas fa-user-plus text-indigo-400"></i> GANTI EMAIL
-                </button>
+          {/* 2. Email User */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-1">
+              2. Email Pengguna *
+            </label>
+            <div className="relative">
+              <input 
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="contoh@gmail.com"
+                className="w-full bg-slate-900 border border-white/10 rounded-2xl p-3.5 pr-10 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans"
+                required
+              />
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                <i className="fas fa-envelope text-xs"></i>
               </div>
             </div>
-          ) : !useEmailLogin ? (
-            <div className="space-y-4">
-              {/* Outlet Selector readily available */}
-              <div className="space-y-2 text-left">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">
-                  1. Pilih Outlet Anda
-                </label>
-                <select 
-                  value={selectedOutlet}
-                  onChange={(e) => setSelectedOutlet(e.target.value as Outlet)}
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl p-3.5 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans"
-                >
-                  <option value="">-- Pilih Outlet Anda --</option>
-                  {(Object.entries(groupedOutlets) as [string, OutletConfig[]][]).map(([area, list]) => (
-                    <optgroup key={area} label={`📍 ${area}`} className="bg-slate-950 text-indigo-400 font-black">
-                      {list.map(cfg => (
-                        <option key={cfg.name} value={cfg.name} className="bg-slate-900 text-white font-bold">
-                          {cfg.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
+          </div>
 
-              <div className="space-y-2.5">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2 block text-left">
-                  2. Pilih Metode Masuk
-                </label>
-                <button 
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                  className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-2xl transition-all flex items-center justify-center gap-3 active:scale-95 border border-white/10 ${
-                    loading ? 'bg-slate-800 text-slate-600 cursor-wait' : 'bg-white text-slate-900 hover:bg-slate-100 shadow-purple-500/10'
-                  }`}
-                >
-                  {loading ? (
-                    <>
-                      <i className="fas fa-circle-notch fa-spin"></i>
-                      Menghubungkan...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fab fa-google text-base text-red-500"></i>
-                      Sign in with Google
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUseEmailLogin(true)}
-                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-[0.15em] shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95 border border-white/10"
-                >
-                  <i className="fas fa-envelope text-indigo-200"></i>
-                  Masuk Langsung via Email
-                </button>
-              </div>
+          {/* Primary Submit Button */}
+          <button 
+            type="submit"
+            disabled={loading || !selectedOutlet}
+            className="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/60 disabled:text-slate-500 text-white font-black text-xs uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-2.5 active:scale-95 border border-indigo-400/30 cursor-pointer"
+          >
+            {loading ? (
+              <>
+                <i className="fas fa-circle-notch fa-spin"></i>
+                MEMPROSES MASUK...
+              </>
+            ) : (
+              <>
+                <i className="fas fa-sign-in-alt text-xs"></i>
+                MASUK KE {selectedOutlet || 'OUTLET'}
+              </>
+            )}
+          </button>
+        </form>
 
-              <div className="relative my-3">
-                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                  <div className="w-full border-t border-white/5"></div>
-                </div>
-                <div className="relative flex justify-center text-[8px] uppercase tracking-widest font-black">
-                  <span className="bg-[#1e293b] px-3 text-slate-500 font-black">ATAU AKSES LANGSUNG</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button 
-                  type="button"
-                  onClick={() => onPublicView?.(ModuleType.REGIONAL_REPORT)}
-                  className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-black text-[10px] uppercase tracking-[0.1em] transition-all flex items-center justify-center gap-2 active:scale-95 border border-white/10"
-                >
-                  <i className="fas fa-chart-line text-indigo-400"></i>
-                  Laporan Regional
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowOutletControlModal(true)}
-                  className="w-full py-3 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-black text-[10px] uppercase tracking-[0.1em] transition-all flex items-center justify-center gap-2 active:scale-95 border border-amber-500/30"
-                >
-                  <i className="fas fa-store-alt text-amber-400"></i>
-                  Outlet Control
-                </button>
-              </div>
-            </div>
-          ) : (
-            <form onSubmit={handleManualEmailLogin} className="space-y-4 animate-fade-in-up text-left">
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Pilih Outlet *</label>
-                <select 
-                  value={selectedOutlet}
-                  onChange={(e) => setSelectedOutlet(e.target.value as Outlet)}
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl p-3.5 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans"
-                  required
-                >
-                  <option value="">-- Pilih Outlet Anda --</option>
-                  {(Object.entries(groupedOutlets) as [string, OutletConfig[]][]).map(([area, list]) => (
-                    <optgroup key={area} label={`📍 ${area}`} className="bg-slate-950 text-indigo-400 font-black">
-                      {list.map(cfg => (
-                        <option key={cfg.name} value={cfg.name} className="bg-slate-900 text-white font-bold">
-                          {cfg.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Email Pengguna *</label>
-                <input 
-                  type="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="contoh@gmail.com"
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl p-3.5 text-white font-bold text-sm outline-none focus:ring-2 ring-purple-500 transition-all font-sans"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setUseEmailLogin(false)}
-                  className="py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-black text-[10px] uppercase tracking-[0.1em] shadow-lg transition-all active:scale-95 border border-white/10"
-                >
-                  KEMBALI
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || !selectedOutlet}
-                  className="py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[10px] uppercase tracking-[0.1em] shadow-lg transition-all flex justify-center items-center gap-2 active:scale-95 border border-indigo-400/50"
-                >
-                  {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-sign-in-alt"></i>}
-                  MASUK {selectedOutlet ? selectedOutlet.replace('SH ', '') : ''}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {networkError && (
-            <div className="mt-4 p-4 bg-amber-500/15 border border-amber-500/30 rounded-2xl animate-fade-in relative z-50 text-left">
-              <p className="text-amber-200 text-xs mb-3 leading-relaxed">
-                <i className="fas fa-info-circle mr-2 text-amber-400"></i>
-                Browser atau Iframe memblokir popup Google. Anda dapat masuk langsung menggunakan <strong>Email & Outlet</strong> di formulir di atas, atau buka di <strong>Tab Baru</strong>.
-              </p>
-              <button 
-                type="button"
-                onClick={() => window.open(window.location.href, '_blank')}
-                className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider shadow-lg transition-all flex items-center justify-center gap-2"
-              >
-                <i className="fas fa-external-link-alt"></i>
-                Buka di Tab Baru
-              </button>
-            </div>
-          )}
+        {/* Google Login Alternative */}
+        <div className="mt-4 pt-3 border-t border-white/5 space-y-3">
+          <button 
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 border border-white/10 cursor-pointer ${
+              loading ? 'bg-slate-800 text-slate-600 cursor-wait' : 'bg-white text-slate-900 hover:bg-slate-100 shadow-purple-500/10'
+            }`}
+          >
+            <i className="fab fa-google text-red-500 text-base"></i>
+            <span>Masuk Cepat dengan Google</span>
+          </button>
         </div>
 
-        <div className="mt-8 pt-5 border-t border-white/5 text-center">
-           <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest leading-relaxed">
-             Data outlet disinkronkan secara real-time. Hubungi admin jika terdapat kendala akses.
-           </p>
+        {/* Secondary Links: Regional Report & Outlet Control */}
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+            <div className="w-full border-t border-white/5"></div>
+          </div>
+          <div className="relative flex justify-center text-[8px] uppercase tracking-widest font-black">
+            <span className="bg-[#1e293b] px-3 text-slate-500 font-black">AKSES CEPAT</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <button 
+            type="button"
+            onClick={() => onPublicView?.(ModuleType.REGIONAL_REPORT)}
+            className="py-3 px-3 rounded-2xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 border border-indigo-500/30 cursor-pointer"
+          >
+            <i className="fas fa-chart-line text-xs"></i>
+            <span>Laporan Regional</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowOutletControlModal(true)}
+            className="py-3 px-3 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 border border-amber-500/30 cursor-pointer"
+          >
+            <i className="fas fa-store-alt text-amber-400 text-xs"></i>
+            <span>Outlet Control</span>
+          </button>
+        </div>
+
+        {networkError && (
+          <div className="mt-4 p-3.5 bg-amber-500/15 border border-amber-500/30 rounded-2xl text-left">
+            <p className="text-amber-200 text-xs mb-2 leading-relaxed">
+              <i className="fas fa-info-circle mr-1.5 text-amber-400"></i>
+              Browser memblokir popup Google. Anda dapat masuk langsung menggunakan <strong>Email & Outlet</strong> di formulir di atas.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-6 pt-4 border-t border-white/5 text-center">
+          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+            Multi-User Real-time Sync. Semua outlet terhubung secara otomatis.
+          </p>
         </div>
       </div>
 
@@ -536,4 +397,3 @@ const LoginModule: React.FC<Props> = ({ onLogin, onPublicView, isFullScreen, onT
 };
 
 export default LoginModule;
-

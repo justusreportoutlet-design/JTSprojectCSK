@@ -4,18 +4,22 @@ import {
   getActiveOutletNames, 
   getAreaForOutlet, 
   getQaScoreTier, 
-  QA_PASSING_SCORES 
+  QA_PASSING_SCORES,
+  MONTHS,
+  getActiveRegionalAreas
 } from '../constants';
 import { 
   extractOutletManpowerMap, 
   resolveOutletManpowerData, 
-  calculateManpowerSummary, 
-  getFilledStaff 
+  calculateManpowerSummary 
 } from './manpowerUtils';
 
 export const formatIDR = (val: number): string => {
   return (Math.round(val) || 0).toLocaleString('id-ID');
 };
+
+export type WaReportPeriod = 'MTD' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4';
+export type WaReportScope = 'SELECTED' | 'AREA' | 'ALL';
 
 const normalizeDivision = (rawDiv?: string): 'BAR' | 'KITCHEN' | 'SERVICE' | 'STORE KEEPER' | 'OTHER' => {
   if (!rawDiv) return 'OTHER';
@@ -28,6 +32,25 @@ const normalizeDivision = (rawDiv?: string): 'BAR' | 'KITCHEN' | 'SERVICE' | 'ST
 };
 
 /**
+ * Returns date boundary for regular features according to chosen period (MTD, Week 1..4)
+ */
+export const getPeriodDayRange = (period: WaReportPeriod, daysInMonth: number): { startDay: number; endDay: number; label: string } => {
+  switch (period) {
+    case 'WEEK_1':
+      return { startDay: 1, endDay: Math.min(7, daysInMonth), label: 'Week 1 (Tgl 01 - 07)' };
+    case 'WEEK_2':
+      return { startDay: 8, endDay: Math.min(14, daysInMonth), label: 'Week 2 (Tgl 08 - 14)' };
+    case 'WEEK_3':
+      return { startDay: 15, endDay: Math.min(21, daysInMonth), label: 'Week 3 (Tgl 15 - 21)' };
+    case 'WEEK_4':
+      return { startDay: 22, endDay: daysInMonth, label: `Week 4 (Tgl 22 - ${daysInMonth})` };
+    case 'MTD':
+    default:
+      return { startDay: 1, endDay: daysInMonth, label: `MTD (Tgl 01 - ${daysInMonth})` };
+  }
+};
+
+/**
  * Builds the exact structured WhatsApp report section for a single outlet
  */
 export const buildSingleOutletWaReport = (
@@ -35,8 +58,10 @@ export const buildSingleOutletWaReport = (
   selectedMonth: number,
   selectedYear: number,
   allOutletsData: Record<string, any>,
-  globalData: AppState,
-  outletIndex: number = 1
+  globalData?: AppState,
+  outletIndex: number = 1,
+  period: WaReportPeriod = 'MTD',
+  forcedAreaName?: string
 ): string => {
   const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
   const monthKey = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
@@ -44,8 +69,13 @@ export const buildSingleOutletWaReport = (
   const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
   const prevMonthKey = `${prevYear}-${String(prevMonthIdx + 1).padStart(2, '0')}`;
 
+  const { startDay, endDay, label: periodLabel } = getPeriodDayRange(period, daysInMonth);
+
+  // Area resolution
+  const areaName = forcedAreaName || getAreaForOutlet(outletName) || 'JAKARTA';
+
   // Outlet data resolution
-  const outletDoc = (allOutletsData && allOutletsData[outletName]) || {};
+  const outletDoc = (allOutletsData && allOutletsData[outletName]) || (allOutletsData && allOutletsData[outletName.trim()]) || {};
   const monthDoc = outletDoc[String(selectedMonth)] || outletDoc[selectedMonth] || outletDoc.monthlyData?.[String(selectedMonth)] || {};
   const prevMonthDoc = outletDoc[String(prevMonthIdx)] || outletDoc[prevMonthIdx] || outletDoc.monthlyData?.[String(prevMonthIdx)] || {};
 
@@ -65,6 +95,12 @@ export const buildSingleOutletWaReport = (
     mtdBudgetRevenue = Number(cogsData.strategyTargetRevenue) || 0;
   } else if (monthDoc.budgetRevenue !== undefined && Number(monthDoc.budgetRevenue) > 0) {
     mtdBudgetRevenue = Number(monthDoc.budgetRevenue) || 0;
+  }
+
+  // If a specific week is chosen, proportionally scale the budget for variance comparison
+  if (period !== 'MTD') {
+    const fraction = (endDay - startDay + 1) / daysInMonth;
+    mtdBudgetRevenue = Math.round(mtdBudgetRevenue * fraction);
   }
 
   let totalActualRevenue = 0;
@@ -88,7 +124,7 @@ export const buildSingleOutletWaReport = (
     'dailyEverestLedger', 'dailyIkigaiLedger', 'dailySaungKubilLedger', 'dailyKebunkuLedger'
   ];
 
-  for (let d = 1; d <= daysInMonth; d++) {
+  for (let d = startDay; d <= endDay; d++) {
     const dObj = new Date(selectedYear, selectedMonth, d);
     const dayOfWeek = dObj.getDay(); // 0 = Sun, 1..5 = Mon..Fri, 6 = Sat
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
@@ -158,7 +194,7 @@ export const buildSingleOutletWaReport = (
       belanjaMainKitchen += mkList.reduce((acc: number, it: any) => acc + ((Number(it.qty) || 1) * (Number(it.price) || 0)), 0);
     }
 
-    // Cash & Commodity
+    // Cash & Commodity (Commodity Expense)
     const cashList = monthDoc.dailyCashLedger?.[dateStr] || outletDoc.dailyCashLedger?.[dateStr];
     if (Array.isArray(cashList) && cashList.length > 0) {
       belanjaCash += cashList.reduce((acc: number, it: any) => acc + ((Number(it.qty) || 1) * (Number(it.price) || 0)), 0);
@@ -180,8 +216,14 @@ export const buildSingleOutletWaReport = (
   // Fallback expenses if ledgers are empty
   if (belanjaMainStore === 0 && belanjaMainKitchen === 0 && belanjaSupplier === 0 && belanjaCash === 0) {
     const expensesObj = monthDoc.expenses || outletDoc.expenses || {};
-    Object.values(expensesObj).forEach((exp: any) => {
+    Object.entries(expensesObj).forEach(([dStr, exp]: [string, any]) => {
       if (!exp) return;
+      // Check date bounds
+      const parts = dStr.split('-');
+      if (parts.length >= 3) {
+        const dNum = parseInt(parts[2], 10);
+        if (dNum < startDay || dNum > endDay) return;
+      }
       belanjaMainStore += Number(exp.mainStore) || 0;
       belanjaMainKitchen += Number(exp.mainKitchen) || 0;
       belanjaCash += (Number(exp.cash) || 0) + (Number(exp.commodity) || 0);
@@ -203,21 +245,18 @@ export const buildSingleOutletWaReport = (
   const dinnerContribPct = totalActualRevenue > 0 ? (totalDinnerRevenue / totalActualRevenue) * 100 : 0;
 
   // ==========================================
-  // 2. BELANJA
+  // 2. BELANJA & 3. COGS
   // ==========================================
   let totalBelanja = belanjaMainStore + belanjaMainKitchen + belanjaSupplier + belanjaCash;
-  if (cogsData.useManualMtdBelanja && Number(cogsData.manualMtdBelanja) > 0) {
+  if (cogsData.useManualMtdBelanja && Number(cogsData.manualMtdBelanja) > 0 && period === 'MTD') {
     totalBelanja = Number(cogsData.manualMtdBelanja);
   }
   const foodCostPct = totalActualRevenue > 0 ? (totalBelanja / totalActualRevenue) * 100 : 0;
 
-  // ==========================================
-  // 3. COGS
-  // ==========================================
   const beginInventory = Number(cogsData.beginningInventory) || 0;
-  const rnd = Number(cogsData.rnd) || 0;
-  const wrongmaker = Number(cogsData.wrongMaker) || 0;
-  const budgetMarketing = Number(cogsData.marketingKol) || 0;
+  const rnd = Number(cogsData.rndCost || cogsData.rndExpenses || cogsData.rnd) || 0;
+  const wrongmaker = Number(cogsData.wrongMakerCost || cogsData.wrongMakerExpenses || cogsData.wrongmaker) || 0;
+  const budgetMarketing = Number(cogsData.marketingExpenses || cogsData.kolExpenses || cogsData.marketingKol || cogsData.budgetMarketing) || 0;
 
   const closingInvPercent = cogsData.closingInventoryPercent !== undefined 
     ? Number(cogsData.closingInventoryPercent) 
@@ -226,18 +265,24 @@ export const buildSingleOutletWaReport = (
   const hasEndingInv = cogsData.endingInventory !== undefined && Number(cogsData.endingInventory) > 0;
   const endingInventory = hasEndingInv ? Number(cogsData.endingInventory) : simulatedClosing;
 
-  const cogsActual = Math.max(0, beginInventory + totalBelanja - endingInventory);
+  const cogsActual = Math.max(0, beginInventory + totalBelanja - endingInventory - rnd - wrongmaker - budgetMarketing);
   const cogsActualPct = totalActualRevenue > 0 ? (cogsActual / totalActualRevenue) * 100 : 0;
 
+  // COGS PROJECTION
+  const targetBudgetPercent = Number(cogsData.targetBudgetPercent || cogsData.targetCogsPercent) || 43.0;
+  const budgetBelanja = Math.round(mtdForecast * (targetBudgetPercent / 100));
+  const sisaBelanja = budgetBelanja - totalBelanja;
+  const cogsProjected = Math.max(0, beginInventory + budgetBelanja - simulatedClosing);
+  const cogsProjectedPct = mtdForecast > 0 ? (cogsProjected / mtdForecast) * 100 : 0;
+
   // ==========================================
-  // 4. OVERTIME & MANPOWER
+  // 4. OVERTIME (Cut-off 26 - 25)
   // ==========================================
   const allManpower = extractOutletManpowerMap(outletDoc, globalData?.manpowerData);
   const mpData: OutletManpowerData = resolveOutletManpowerData(allManpower, outletName, monthKey);
   const mpSummary = calculateManpowerSummary(mpData);
   const totalManPower = mpSummary.grandTotalActual;
 
-  // Overtime 4 Weeks cut-off
   const weekRanges = [
     { week: 1, startDate: `${prevMonthKey}-26`, endDate: `${monthKey}-01` },
     { week: 2, startDate: `${monthKey}-02`, endDate: `${monthKey}-08` },
@@ -245,7 +290,6 @@ export const buildSingleOutletWaReport = (
     { week: 4, startDate: `${monthKey}-16`, endDate: `${monthKey}-25` },
   ];
 
-  // Merge daily overtime
   const allDailyOT: Record<string, any[]> = {};
   const mergeOT = (source: Record<string, any[]>) => {
     if (!source || typeof source !== 'object') return;
@@ -261,63 +305,50 @@ export const buildSingleOutletWaReport = (
   mergeOT(prevMonthDoc.dailyOvertime || {});
   mergeOT(monthDoc.dailyOvertime || outletDoc.dailyOvertime || {});
 
-  // Kitchen, Bar, Service hours per week
   const kWeeklyHours = [0, 0, 0, 0];
   const bWeeklyHours = [0, 0, 0, 0];
   const sWeeklyHours = [0, 0, 0, 0];
 
-  const kWeeklyStaff = [new Set<string>(), new Set<string>(), new Set<string>(), new Set<string>()];
-  const bWeeklyStaff = [new Set<string>(), new Set<string>(), new Set<string>(), new Set<string>()];
-  const sWeeklyStaff = [new Set<string>(), new Set<string>(), new Set<string>(), new Set<string>()];
+  const kWeeklyPay = [0, 0, 0, 0];
+  const bWeeklyPay = [0, 0, 0, 0];
+  const sWeeklyPay = [0, 0, 0, 0];
 
   weekRanges.forEach((wRange, wIdx) => {
     Object.entries(allDailyOT).forEach(([dateStr, entries]) => {
       if (dateStr >= wRange.startDate && dateStr <= wRange.endDate && Array.isArray(entries)) {
         entries.forEach(e => {
           if (!e) return;
-          const rawHours = Number(e.overtimeHours) || Number(e.hours) || 0;
-          const div = normalizeDivision(e.division);
-          const sId = String(e.staffId || e.id || e.staffName || '');
+          const rawHours = Number(e.overtimeHours) || Number(e.hours) || Number(e.duration) || 0;
+          const rawPay = Number(e.pay) || Number(e.overtimePay) || (rawHours * 15000);
+          const div = normalizeDivision(e.division || e.role);
 
           if (div === 'KITCHEN' || div === 'STORE KEEPER') {
             kWeeklyHours[wIdx] += rawHours;
-            if (sId) kWeeklyStaff[wIdx].add(sId);
+            kWeeklyPay[wIdx] += rawPay;
           } else if (div === 'BAR') {
             bWeeklyHours[wIdx] += rawHours;
-            if (sId) bWeeklyStaff[wIdx].add(sId);
+            bWeeklyPay[wIdx] += rawPay;
           } else if (div === 'SERVICE') {
             sWeeklyHours[wIdx] += rawHours;
-            if (sId) sWeeklyStaff[wIdx].add(sId);
+            sWeeklyPay[wIdx] += rawPay;
           }
         });
       }
     });
   });
 
-  const kStaffDivCount = Math.max(1, mpSummary.kitchenActual + mpSummary.stewardActual + mpSummary.storekeeperActual);
-  const bStaffDivCount = Math.max(1, mpSummary.barActual);
-  const sStaffDivCount = Math.max(1, mpSummary.serviceActual + mpSummary.paActual);
-
-  const kWeeklyAvg = kWeeklyHours.map((h, i) => {
-    const count = kWeeklyStaff[i].size > 0 ? kWeeklyStaff[i].size : kStaffDivCount;
-    return count > 0 ? h / count : 0;
-  });
-  const bWeeklyAvg = bWeeklyHours.map((h, i) => {
-    const count = bWeeklyStaff[i].size > 0 ? bWeeklyStaff[i].size : bStaffDivCount;
-    return count > 0 ? h / count : 0;
-  });
-  const sWeeklyAvg = sWeeklyHours.map((h, i) => {
-    const count = sWeeklyStaff[i].size > 0 ? sWeeklyStaff[i].size : sStaffDivCount;
-    return count > 0 ? h / count : 0;
-  });
+  const kStaffDivCount = Math.max(0, mpSummary.kitchenActual + mpSummary.stewardActual + mpSummary.storekeeperActual);
+  const bStaffDivCount = Math.max(0, mpSummary.barActual);
+  const sStaffDivCount = Math.max(0, mpSummary.serviceActual + mpSummary.paActual);
 
   const kTotalHours = kWeeklyHours.reduce((a, b) => a + b, 0);
   const bTotalHours = bWeeklyHours.reduce((a, b) => a + b, 0);
   const sTotalHours = sWeeklyHours.reduce((a, b) => a + b, 0);
 
-  const kTotalAvg = kStaffDivCount > 0 ? kTotalHours / kStaffDivCount : 0;
-  const bTotalAvg = bStaffDivCount > 0 ? bTotalHours / bStaffDivCount : 0;
-  const sTotalAvg = sStaffDivCount > 0 ? sTotalHours / sStaffDivCount : 0;
+  // Format overtime line: "12.5 / Jam" or "0 / Jam"
+  const formatOtHours = (h: number): string => {
+    return `${h > 0 ? h.toFixed(1) : '0'} / Jam`;
+  };
 
   // ==========================================
   // 5. MAN POWER DETAILS
@@ -331,34 +362,33 @@ export const buildSingleOutletWaReport = (
     return `${filledCount} Orang`;
   };
 
-  const getVacantSummary = (div: string, status: 'VACANT_OPEN' | 'VACANT_HOLD'): string => {
+  const getVacantList = (div: string, status: 'VACANT_OPEN' | 'VACANT_HOLD'): string => {
     const divSecs = sections.filter(s => {
       if (div === 'KITCHEN') return s.division === 'KITCHEN' || s.name.includes('STEWARD') || s.name.includes('STORE');
       if (div === 'SERVICE') return s.division === 'SERVICE' || s.name.includes('PUBLIC');
       return s.division === div;
     });
     const slots = divSecs.flatMap(s => s.slots).filter(sl => sl.status === status);
-    if (slots.length === 0) return '-';
+    if (slots.length === 0) return '-\n';
     
-    // Group by role
     const map: Record<string, number> = {};
     slots.forEach(s => {
       const role = (s.position || 'Staff').trim();
       map[role] = (map[role] || 0) + 1;
     });
-    return Object.entries(map).map(([r, c]) => `${c} ${r}`).join(', ');
+    return Object.entries(map).map(([r, c]) => `- ${c} ${r}`).join('\n');
   };
 
   // Kitchen
-  const kLeader = getSectionStaffCount(/leader|chef/i, 'KITCHEN');
+  const kLeader = getSectionStaffCount(/leader|chef|spv|supervisor/i, 'KITCHEN');
   const kGrill = getSectionStaffCount(/grill/i, 'KITCHEN');
   const kAsian = getSectionStaffCount(/asian/i, 'KITCHEN');
   const kFryer = getSectionStaffCount(/fryer/i, 'KITCHEN');
   const kPrep = getSectionStaffCount(/prep/i, 'KITCHEN');
   const kSteward = getSectionStaffCount(/steward/i);
   const kStore = getSectionStaffCount(/store/i);
-  const kVacantOpen = getVacantSummary('KITCHEN', 'VACANT_OPEN');
-  const kVacantHold = getVacantSummary('KITCHEN', 'VACANT_HOLD');
+  const kVacantOpen = getVacantList('KITCHEN', 'VACANT_OPEN');
+  const kVacantHold = getVacantList('KITCHEN', 'VACANT_HOLD');
 
   // Bar
   const barSec = sections.find(s => s.division === 'BAR');
@@ -367,17 +397,17 @@ export const buildSingleOutletWaReport = (
   const barBaristaCount = barSlots.filter(s => s.status === 'FILLED' && !/captain|leader|spv|supervisor|head/i.test(s.position)).length;
   const bLeader = `${barLeaderCount} Orang`;
   const bBarista = `${barBaristaCount} Orang`;
-  const bVacantOpen = getVacantSummary('BAR', 'VACANT_OPEN');
-  const bVacantHold = getVacantSummary('BAR', 'VACANT_HOLD');
+  const bVacantOpen = getVacantList('BAR', 'VACANT_OPEN');
+  const bVacantHold = getVacantList('BAR', 'VACANT_HOLD');
 
   // Service
-  const sLeader = getSectionStaffCount(/leader|manager|supervisor/i, 'SERVICE');
+  const sLeader = getSectionStaffCount(/leader|manager|supervisor|captain/i, 'SERVICE');
   const sCashier = getSectionStaffCount(/cashier/i, 'SERVICE');
   const sGreeter = getSectionStaffCount(/greeter/i, 'SERVICE');
   const sChecker = getSectionStaffCount(/checker/i, 'SERVICE');
   const sServer = getSectionStaffCount(/server|waiter/i, 'SERVICE');
-  const sVacantOpen = getVacantSummary('SERVICE', 'VACANT_OPEN');
-  const sVacantHold = getVacantSummary('SERVICE', 'VACANT_HOLD');
+  const sVacantOpen = getVacantList('SERVICE', 'VACANT_OPEN');
+  const sVacantHold = getVacantList('SERVICE', 'VACANT_HOLD');
 
   // ==========================================
   // 6. GOOGLE REVIEW
@@ -398,27 +428,33 @@ export const buildSingleOutletWaReport = (
   });
   let totalReviewMtd = grS1 + grS2 + grS3 + grS4 + grS5;
   let totalPointsMtd = (grS1 * 1) + (grS2 * 2) + (grS3 * 3) + (grS4 * 4) + (grS5 * 5);
-  let currentRating = totalReviewMtd > 0 ? Number((totalPointsMtd / totalReviewMtd).toFixed(1)) : 0;
+  let currentRating = totalReviewMtd > 0 ? Number((totalPointsMtd / totalReviewMtd).toFixed(2)) : 0;
 
-  // Fallback to direct state
   const directGr = monthDoc.googleReview || outletDoc.googleReview || {};
   if (totalReviewMtd === 0 && Number(directGr.totalReview) > 0) {
     totalReviewMtd = Number(directGr.totalReview) || 0;
     currentRating = Number(directGr.currentRating) || 0;
   }
 
-  // Previous month review
   const prevGR: Record<string, any> = {
     ...(outletDoc.dailyGoogleReview || {}),
     ...(prevMonthDoc.dailyGoogleReview || {})
   };
-  let prevTotalRev = 0;
+  let prevS1 = 0, prevS2 = 0, prevS3 = 0, prevS4 = 0, prevS5 = 0;
   Object.entries(prevGR).forEach(([dStr, r]: [string, any]) => {
     if (dStr.startsWith(prevMonthKey) && r) {
-      prevTotalRev += (Number(r.stars1) || 0) + (Number(r.stars2) || 0) + (Number(r.stars3) || 0) + (Number(r.stars4) || 0) + (Number(r.stars5) || 0);
+      prevS1 += Number(r.stars1) || 0;
+      prevS2 += Number(r.stars2) || 0;
+      prevS3 += Number(r.stars3) || 0;
+      prevS4 += Number(r.stars4) || 0;
+      prevS5 += Number(r.stars5) || 0;
     }
   });
+  const prevTotalRev = prevS1 + prevS2 + prevS3 + prevS4 + prevS5;
+  const prevRating = prevTotalRev > 0 ? ((prevS1 * 1) + (prevS2 * 2) + (prevS3 * 3) + (prevS4 * 4) + (prevS5 * 5)) / prevTotalRev : 0;
+
   const varianceReview = totalReviewMtd - prevTotalRev;
+  const varianceRating = currentRating - prevRating;
 
   // ==========================================
   // 7. GSI
@@ -454,7 +490,6 @@ export const buildSingleOutletWaReport = (
 
   const gsiPerformance = gsiMaxPointsSum > 0 ? (gsiPointsSum / gsiMaxPointsSum) * 100 : 0;
 
-  // Previous month GSI
   const prevDailyGSI: Record<string, GSIRow[]> = {
     ...(outletDoc.dailyGSI || {}),
     ...(prevMonthDoc.dailyGSI || {})
@@ -494,7 +529,17 @@ export const buildSingleOutletWaReport = (
     let total = 0;
     const items: { name: string; qty: number; price: number; reason: string }[] = [];
     Object.entries(ledgerObj).forEach(([dStr, list]) => {
-      if (dStr.startsWith(monthKey) && Array.isArray(list)) {
+      // Date filter check
+      let inRange = dStr.startsWith(monthKey);
+      if (period !== 'MTD' && inRange) {
+        const parts = dStr.split('-');
+        if (parts.length >= 3) {
+          const dayNum = parseInt(parts[2], 10);
+          inRange = dayNum >= startDay && dayNum <= endDay;
+        }
+      }
+
+      if (inRange && Array.isArray(list)) {
         list.forEach(it => {
           if (!it) return;
           const q = Number(it.qty) || 1;
@@ -514,20 +559,20 @@ export const buildSingleOutletWaReport = (
   };
 
   const cityLedgerData = extractLedgerSummary(monthDoc.dailyCityLedger || outletDoc.dailyCityLedger);
-  const guestSatData = extractLedgerSummary(monthDoc.dailyGuestSatisfaction || outletDoc.dailyGuestSatisfaction);
+  const guestSatData = extractLedgerSummary(monthDoc.dailyGuestSatisfaction || monthDoc.dailySatisfaction || outletDoc.dailyGuestSatisfaction);
   const compData = extractLedgerSummary(monthDoc.dailyComplimentary || outletDoc.dailyComplimentary);
 
   const formatLedgerLines = (data: { total: number; items: { name: string; qty: number; price: number; reason: string }[] }) => {
     if (data.items.length === 0) {
-      return `_Nama Item_ : -\n_Reason_ : -`;
+      return `_Nama Item_ :\n_Reason_ :`;
     }
-    const itemNames = data.items.map(it => `${it.name}${it.qty > 1 ? ` (${it.qty}x)` : ''}`).slice(0, 3).join(', ');
+    const itemNames = data.items.map(it => `${it.name}${it.qty > 1 ? ` (${it.qty}x)` : ''}`).slice(0, 5).join(', ');
     const reasons = Array.from(new Set(data.items.map(it => it.reason).filter(r => r && r !== '-'))).slice(0, 3).join(', ') || '-';
     return `_Nama Item_ : ${itemNames}\n_Reason_ : ${reasons}`;
   };
 
   // ==========================================
-  // 9. VOID BILL
+  // 9. VOID BIL
   // ==========================================
   const voidRecords: VoidBillRecord[] = [];
   const addVoids = (vObj?: any) => {
@@ -535,12 +580,21 @@ export const buildSingleOutletWaReport = (
     if (Array.isArray(vObj)) {
       vObj.forEach((r: any) => {
         if (r && String(r.date || '').startsWith(monthKey)) {
+          if (period !== 'MTD') {
+            const dayNum = parseInt(String(r.date || '').split('-')[2], 10);
+            if (dayNum < startDay || dayNum > endDay) return;
+          }
           if (!r.outlet || r.outlet === outletName) voidRecords.push(r);
         }
       });
     } else if (typeof vObj === 'object') {
       Object.entries(vObj).forEach(([dKey, list]) => {
-        if (String(dKey).startsWith(monthKey) && Array.isArray(list)) {
+        let inRange = String(dKey).startsWith(monthKey);
+        if (period !== 'MTD' && inRange) {
+          const dayNum = parseInt(dKey.split('-')[2], 10);
+          inRange = dayNum >= startDay && dayNum <= endDay;
+        }
+        if (inRange && Array.isArray(list)) {
           list.forEach((r: any) => {
             if (r && (!r.outlet || r.outlet === outletName)) voidRecords.push(r);
           });
@@ -551,7 +605,6 @@ export const buildSingleOutletWaReport = (
   addVoids(monthDoc.dailyVoidBills || outletDoc.dailyVoidBills);
   addVoids(monthDoc.voidBills || outletDoc.voidBills);
 
-  // Group voids by staff
   const staffVoidMap = new Map<string, { name: string; count: number; total: number; reasons: Set<string> }>();
   voidRecords.forEach(r => {
     const sName = (r.staffName || (r as any).name || 'Staff').trim();
@@ -564,21 +617,16 @@ export const buildSingleOutletWaReport = (
     if (r.reason) entry.reasons.add(r.reason);
   });
 
-  const staffVoidList = Array.from(staffVoidMap.values()).sort((a, b) => b.total - a.total);
+  const staffVoidList = Array.from(staffVoidMap.values()).sort((a, b) => b.count - a.count);
   let voidBillSectionText = '';
   if (staffVoidList.length > 0) {
     voidBillSectionText = staffVoidList.map((st, idx) => {
       const reasonStr = Array.from(st.reasons).join(', ') || '-';
-      return `_${idx + 1}. Nama Staff_: ${st.name}
-_Total Kesalahan_: ${st.count}
-_Total Price_: Rp. ${formatIDR(st.total)}
-_Reason_: ${reasonStr}`;
+      const repeatTag = st.count > 1 ? ` (${st.count}x Kesalahan)` : '';
+      return `_${idx + 1}. Nama Staff_: ${st.name}${repeatTag}\n_Total Kesalahan_: ${st.count}\n_Total Price_: Rp. ${formatIDR(st.total)}\n_Reason_: ${reasonStr}`;
     }).join('\n\n');
   } else {
-    voidBillSectionText = `_1. Nama Staff_: -
-_Total Kesalahan_: 0
-_Total Price_: Rp. 0
-_Reason_: -`;
+    voidBillSectionText = `_1. Nama Staff_:\n_Total Kesalahan_:\n_Total Price_:\n_Reason_:`;
   }
 
   // ==========================================
@@ -617,8 +665,10 @@ _Reason_: -`;
   const qaTotalScore = validDivs.length > 0 ? Number((validDivs.reduce((a, b) => a + b, 0) / validDivs.length).toFixed(1)) : 0;
 
   const getTierLabel = (score: number): string => {
-    if (score === 0) return '-';
-    return getQaScoreTier(score).label;
+    if (score === 0) return 'Parameters To Improve';
+    if (score >= 90) return 'Excellent';
+    if (score >= 80) return 'Satisfactory';
+    return 'Parameters To Improve';
   };
 
   const qaKitchenParam = getTierLabel(qaKitchenScore);
@@ -627,147 +677,199 @@ _Reason_: -`;
   const qaAllStatus = getTierLabel(qaTotalScore);
 
   // ==========================================
-  // ASSEMBLE COMPLETE REPORT FOR SINGLE OUTLET
+  // ASSEMBLE COMPLETE REPORT ACCORDING TO USER'S EXACT TEMPLATE
   // ==========================================
-  return `${outletIndex}. *${outletName.toUpperCase()}*
+  let text = '';
+  text += `*REKAPITULATION OUTLET*\n`;
+  text += `*AREA* : ${areaName.toUpperCase()}\n\n`;
+  text += `${outletIndex}. *${outletName.toUpperCase()}*\n\n`;
 
-*REVENUE*
-- MTD Revenue : Rp. ${formatIDR(totalActualRevenue)}
-- MTD Budget Revenue : Rp. ${formatIDR(mtdBudgetRevenue)}
-- Variance : ${revVariance >= 0 ? '+' : '-'}Rp. ${formatIDR(Math.abs(revVariance))} (${mtdBudgetRevenue > 0 ? ((revVariance / mtdBudgetRevenue) * 100).toFixed(1) : '0.0'}%)
-- MTD Forecast : Rp. ${formatIDR(mtdForecast)}
+  // *REVENUE*
+  text += `*REVENUE*\n`;
+  text += `- MTD Revenue : Rp. ${formatIDR(totalActualRevenue)}\n`;
+  text += `- MTD Budget Revenue : Rp. ${formatIDR(mtdBudgetRevenue)}\n`;
+  text += `- Variance : ${revVariance >= 0 ? '+' : '-'}Rp. ${formatIDR(Math.abs(revVariance))}\n`;
+  text += `- MTD Forecast : Rp. ${formatIDR(mtdForecast)}\n\n`;
 
-- Total Revenue Weekdays : Rp. ${formatIDR(totalRevenueWeekdays)}
-- Total Revenue Weekend : Rp. ${formatIDR(totalRevenueWeekend)}
-- Rata² Revenue Weekdays : Rp. ${formatIDR(avgRevWeekdays)}
-- Rata² Revenue Weekend : Rp. ${formatIDR(avgRevWeekend)}
-- MTD Rata" Contribution Lunch : ${lunchContribPct.toFixed(1)}%
-- MTD Rata" Contribution Dinner : ${dinnerContribPct.toFixed(1)}%
+  text += `- Total Revenue Weekdays : Rp. ${formatIDR(totalRevenueWeekdays)}\n`;
+  text += `- Total Revenue Weekend : Rp. ${formatIDR(totalRevenueWeekend)}\n`;
+  text += `- Rata² Revenue Weekdays : Rp. ${formatIDR(avgRevWeekdays)}\n`;
+  text += `- Rata² Revenue Weekend : Rp. ${formatIDR(avgRevWeekend)}\n`;
+  text += `- MTD Rata" Contribution Lunch : ${lunchContribPct.toFixed(1)}%\n`;
+  text += `- MTD Rata" Contribution Dinner : ${dinnerContribPct.toFixed(1)}%\n\n`;
 
-*BELANJA*
-- Main Store : Rp. ${formatIDR(belanjaMainStore)}
-- Main Kitchen : Rp. ${formatIDR(belanjaMainKitchen)}
-- Supplier : Rp. ${formatIDR(belanjaSupplier)}
-- Cash : Rp. ${formatIDR(belanjaCash)}
-- Total Belanja : Rp. ${formatIDR(totalBelanja)}
-- Food Cost : ${foodCostPct.toFixed(1)}%
+  // *BELANJA*
+  text += `*BELANJA*\n`;
+  text += `- Main Store : Rp. ${formatIDR(belanjaMainStore)}\n`;
+  text += `- Main Kitchen : Rp. ${formatIDR(belanjaMainKitchen)}\n`;
+  text += `- Supplier : Rp. ${formatIDR(belanjaSupplier)}\n`;
+  text += `- Cash : Rp. ${formatIDR(belanjaCash)} (Commodity Expense)\n`;
+  text += `- Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `- Food Cost : ${foodCostPct.toFixed(2)}%\n\n`;
 
-*COGS*
-- Begin Inventory : Rp. ${formatIDR(beginInventory)}
-- Actual Total Belanja : Rp. ${formatIDR(totalBelanja)}
-- Rnd : Rp. ${formatIDR(rnd)}
-- Wrongmaker : Rp. ${formatIDR(wrongmaker)}
-- Ending Inventory : Rp. ${formatIDR(endingInventory)}
-- Budget Marketing/KOL : Rp. ${formatIDR(budgetMarketing)}
-- COGS Actual : Rp. ${formatIDR(cogsActual)}
-- COGS (%) : ${cogsActualPct.toFixed(1)}%
-- FOOD COST (%) : ${foodCostPct.toFixed(1)}%
+  // *COGS ACTUAL*
+  text += `*COGS ACTUAL*\n`;
+  text += `- Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
+  text += `- Actual Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `- Rnd : Rp. ${formatIDR(rnd)}\n`;
+  text += `- Wrongmaker : Rp. ${formatIDR(wrongmaker)}\n`;
+  text += `- Budget Marketing/KOL : Rp. ${formatIDR(budgetMarketing)}\n`;
+  text += `- Ending Inventory : Rp. ${formatIDR(endingInventory)}\n`;
+  text += `- COGS Actual : Rp ${formatIDR(cogsActual)}\n`;
+  text += `- COGS (%) : ${cogsActualPct.toFixed(2)}%\n`;
+  text += `- FOOD COST (%) : ${foodCostPct.toFixed(2)}%\n\n`;
 
-*OVERTIME*
-- Total Man Power : ${totalManPower} Orang
+  // *COGS PROJECTION*
+  text += `*COGS PROJECTION*\n`;
+  text += `- Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
+  text += `- Budget Belanja : Rp. ${formatIDR(budgetBelanja)}\n`;
+  text += `- Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `- Sisa Belanja : Rp. ${formatIDR(sisaBelanja)}\n`;
+  text += `- Closing Inventory : Rp. ${formatIDR(simulatedClosing)}\n`;
+  text += `- COGS Actual : Rp. ${formatIDR(cogsProjected)}\n`;
+  text += `- COGS (%) : ${cogsProjectedPct.toFixed(2)}%\n\n`;
 
-- *Kitchen* :
-_Week 1_: ${kWeeklyHours[0].toFixed(1)} Jam / ${kWeeklyAvg[0].toFixed(1)} Jam (Rata² Overtime)
-_Week 2_: ${kWeeklyHours[1].toFixed(1)} Jam / ${kWeeklyAvg[1].toFixed(1)} Jam (Rata² Overtime)
-_Week 3_: ${kWeeklyHours[2].toFixed(1)} Jam / ${kWeeklyAvg[2].toFixed(1)} Jam (Rata² Overtime)
-_Week 4_: ${kWeeklyHours[3].toFixed(1)} Jam / ${kWeeklyAvg[3].toFixed(1)} Jam (Rata² Overtime)
-_Total Overtime_ : ${kTotalHours.toFixed(1)} Jam / ${kTotalAvg.toFixed(1)} Jam (Rata² Overtime)
+  // *OVERTIME* (Cut Off 26 - 25)
+  text += `*OVERTIME*\n`;
+  text += `TOTAL MANA POWER : ${totalManPower} Orang\n`;
+  text += `- *Kitchen* : ${kStaffDivCount} Orang\n`;
+  text += `_Week 1_: ${formatOtHours(kWeeklyHours[0])}\n`;
+  text += `_Week 2_: ${formatOtHours(kWeeklyHours[1])}\n`;
+  text += `_Week 3_: ${formatOtHours(kWeeklyHours[2])}\n`;
+  text += `_Week 4_: ${formatOtHours(kWeeklyHours[3])}\n`;
+  text += `_Total Overtime_ : ${formatOtHours(kTotalHours)}\n\n`;
 
-- *Bar* :
-_Week 1_: ${bWeeklyHours[0].toFixed(1)} Jam / ${bWeeklyAvg[0].toFixed(1)} Jam (Rata² Overtime)
-_Week 2_: ${bWeeklyHours[1].toFixed(1)} Jam / ${bWeeklyAvg[1].toFixed(1)} Jam (Rata² Overtime)
-_Week 3_: ${bWeeklyHours[2].toFixed(1)} Jam / ${bWeeklyAvg[2].toFixed(1)} Jam (Rata² Overtime)
-_Week 4_: ${bWeeklyHours[3].toFixed(1)} Jam / ${bWeeklyAvg[3].toFixed(1)} Jam (Rata² Overtime)
-_Total Overtime_ : ${bTotalHours.toFixed(1)} Jam / ${bTotalAvg.toFixed(1)} Jam (Rata² Overtime)
+  text += `- *Bar* : ${bStaffDivCount} Orang\n`;
+  text += `_Week 1_: ${formatOtHours(bWeeklyHours[0])}\n`;
+  text += `_Week 2_: ${formatOtHours(bWeeklyHours[1])}\n`;
+  text += `_Week 3_: ${formatOtHours(bWeeklyHours[2])}\n`;
+  text += `_Week 4_: ${formatOtHours(bWeeklyHours[3])}\n`;
+  text += `_Total Overtime_ : ${formatOtHours(bTotalHours)}\n\n`;
 
-- *Service*:
-_Week 1_: ${sWeeklyHours[0].toFixed(1)} Jam / ${sWeeklyAvg[0].toFixed(1)} Jam (Rata² Overtime)
-_Week 2_: ${sWeeklyHours[1].toFixed(1)} Jam / ${sWeeklyAvg[1].toFixed(1)} Jam (Rata² Overtime)
-_Week 3_: ${sWeeklyHours[2].toFixed(1)} Jam / ${sWeeklyAvg[2].toFixed(1)} Jam (Rata² Overtime)
-_Week 4_: ${sWeeklyHours[3].toFixed(1)} Jam / ${sWeeklyAvg[3].toFixed(1)} Jam (Rata² Overtime)
-_Total Overtime_ : ${sTotalHours.toFixed(1)} Jam / ${sTotalAvg.toFixed(1)} Jam (Rata² Overtime)
+  text += `- *Service*: ${sStaffDivCount} Orang\n`;
+  text += `_Week 1_: ${formatOtHours(sWeeklyHours[0])}\n`;
+  text += `_Week 2_: ${formatOtHours(sWeeklyHours[1])}\n`;
+  text += `_Week 3_: ${formatOtHours(sWeeklyHours[2])}\n`;
+  text += `_Week 4_: ${formatOtHours(sWeeklyHours[3])}\n`;
+  text += `_Total Overtime_ : ${formatOtHours(sTotalHours)}\n\n\n`;
 
+  // *MAN POWER*
+  text += `*MAN POWER*\n`;
+  text += `*Kitchen* : ${kStaffDivCount} Orang\n`;
+  text += `_Leader_ : ${kLeader}\n`;
+  text += `_Grilled Section_ : ${kGrill}\n`;
+  text += `_Asian Section_ : ${kAsian}\n`;
+  text += `_Fryer Section_ : ${kFryer}\n`;
+  text += `_Preparation_ : ${kPrep}\n`;
+  text += `_Steward_ : ${kSteward}\n`;
+  text += `_Store Keeper_: ${kStore}\n`;
+  text += `*Vacant Open*\n${kVacantOpen}\n`;
+  text += `*Vacant Hold*\n${kVacantHold}\n\n\n`;
 
-*MAN POWER*
-*Kitchen* :
-_Leader_ : ${kLeader}
-_Grilled Section_ : ${kGrill}
-_Asian Section_ : ${kAsian}
-_Fryer Section_ : ${kFryer}
-_Preparation_ : ${kPrep}
-_Steward_ : ${kSteward}
-_Store Keeper_: ${kStore}
-*Vacant Open* : ${kVacantOpen}
-*Vacant Hold* : ${kVacantHold}
+  text += `*Bar*: ${bStaffDivCount} Orang\n`;
+  text += `_Leader_: ${bLeader}\n`;
+  text += `_Barista_: ${bBarista}\n`;
+  text += `*Vacant Open*\n${bVacantOpen}\n`;
+  text += `*Vacant Hold*\n${bVacantHold}\n\n`;
 
+  text += `*Service* : ${sStaffDivCount} Orang\n`;
+  text += `_Leader_ : ${sLeader}\n`;
+  text += `_Cashier_: ${sCashier}\n`;
+  text += `_Greeter_: ${sGreeter}\n`;
+  text += `_Checker_: ${sChecker}\n`;
+  text += `_Server_: ${sServer}\n`;
+  text += `*Vacant Open*\n${sVacantOpen}\n`;
+  text += `*Vacant Hold*\n${sVacantHold}\n\n`;
 
-*Bar*:
-_Leader_: ${bLeader}
-_Barista_: ${bBarista}
-*Vacant Open* : ${bVacantOpen}
-*Vacant Hold* : ${bVacantHold}
+  // *GOOGLE REVIEW*
+  text += `*GOOGLE REVIEW*\n`;
+  text += `- Total Review : ${totalReviewMtd} Review\n`;
+  text += `- Total Rating : ${currentRating > 0 ? `${currentRating.toFixed(2)} ⭐` : '0 ⭐'}\n`;
+  text += `- Variance Total MTD Review VS Last Month : ${varianceReview >= 0 ? '+' : ''}${varianceReview} Review\n`;
+  text += `- Variance MTD Total Rating Vs Last Month : ${varianceRating >= 0 ? '+' : ''}${varianceRating.toFixed(2)} ⭐\n\n`;
 
-*Service* :
-_Leader_ : ${sLeader}
-_Cashier_: ${sCashier}
-_Greeter_: ${sGreeter}
-_Checker_: ${sChecker}
-_Server_: ${sServer}
-*Vacant Open* : ${sVacantOpen}
-*Vacant Hold* : ${sVacantHold}
+  // *GSI*
+  text += `*GSI*\n`;
+  text += `- Total Review : ${gsiTotalResponses} Review\n`;
+  text += `- Performance : ${gsiPerformance.toFixed(1)}%\n`;
+  text += `- Variance MTD Total Review Vs MTD Last Month : ${varGsiResponses >= 0 ? '+' : ''}${varGsiResponses} Review\n`;
+  text += `- Variance MTD Performance Vs MTD Last Month : ${varGsiPerf >= 0 ? '+' : ''}${varGsiPerf.toFixed(1)}%\n`;
+  text += `- Performance (%) : ${gsiPerformance.toFixed(1)}%\n\n`;
 
-*GOOGLE REVIEW*
-- Total Review : ${totalReviewMtd}
-- Total Rating : ${currentRating.toFixed(1)}
-- Variance Total Review VS Last Month : ${varianceReview >= 0 ? '+' : ''}${varianceReview}
+  // *CITY LEDGER*
+  text += `*CITY LEDGER*\n`;
+  text += `- Total Price : Rp. ${formatIDR(cityLedgerData.total)}\n`;
+  text += `${formatLedgerLines(cityLedgerData)}\n\n`;
 
-*GSI*
-- Total Review : ${gsiTotalResponses}
-- Performance : ${gsiPerformance.toFixed(1)}%
-- Variance MTD Total Review Vs MTD Last Month : ${varGsiResponses >= 0 ? '+' : ''}${varGsiResponses}
-- Variance MTD Performance Vs MTD Last Month : ${varGsiPerf >= 0 ? '+' : ''}${varGsiPerf.toFixed(1)}%
-- Performance (%) : ${gsiPerformance.toFixed(1)}%
+  // *GUEST SATISFACTION*
+  text += `*GUEST SATISFACTION*\n`;
+  text += `- Total Price : Rp. ${formatIDR(guestSatData.total)}\n`;
+  text += `${formatLedgerLines(guestSatData)}\n\n`;
 
-*CITY LEDGER*
-- Total Price : Rp. ${formatIDR(cityLedgerData.total)}
-${formatLedgerLines(cityLedgerData)}
+  // *COMPLIMENTARY*
+  text += `*COMPLIMENTARY*\n`;
+  text += `- Total Price : Rp. ${formatIDR(compData.total)}\n`;
+  text += `${formatLedgerLines(compData)}\n\n\n`;
 
-*GUEST SATISFACTION*
-- Total Price : Rp. ${formatIDR(guestSatData.total)}
-${formatLedgerLines(guestSatData)}
+  // *VOID BIL*
+  text += `*VOID BIL*\n`;
+  text += `${voidBillSectionText}\n\n`;
+  text += `(Tampilkan Summary Nama staff yang melakukan lebih dari satu kali kesalahan termasuk Total Price dan Reasonnya)\n\n`;
 
-*COMPLIMENTARY*
-- Total Price : Rp. ${formatIDR(compData.total)}
-${formatLedgerLines(compData)}
+  // *QA REPORT*
+  text += `*QA REPORT* (Parameters To Improve, Satisfactory / Excellent)\n\n`;
+  text += `- *Service* \n`;
+  text += `_Nilai_ (%) : ${qaServiceScore > 0 ? `${qaServiceScore.toFixed(1)}%` : '0%'}\n`;
+  text += `_Parameters_: ${qaServiceParam}\n`;
+  text += `- *Bar* :\n`;
+  text += `_Nilai_ (%) : ${qaBarScore > 0 ? `${qaBarScore.toFixed(1)}%` : '0%'}\n`;
+  text += `_Parameters_: ${qaBarParam}\n`;
+  text += `- *Kitchen*\n`;
+  text += `_Nilai_ (%) : ${qaKitchenScore > 0 ? `${qaKitchenScore.toFixed(1)}%` : '0%'}\n`;
+  text += `_Parameters_ : ${qaKitchenParam}\n`;
+  text += `*Total Nilai Outlet (%)*: ${qaTotalScore > 0 ? `${qaTotalScore.toFixed(1)}%` : '0%'}\n`;
+  text += `*Status Parameters All Divisi* : ${qaAllStatus}\n\n`;
 
+  text += `NOTES FONT :\nBOLD TEBAL\nGARIS BAWAH MIRING`;
 
-*VOID BIL*
-${voidBillSectionText}
-
-*QA REPORT* (Parameters To Imorove, Satisfactory / Excellent)
-
-- *Service* 
-_Nilai_ (%) : ${qaServiceScore > 0 ? `${qaServiceScore.toFixed(1)}%` : '-'}
-_Parameters_: ${qaServiceParam}
-- *Bar* :
-_Nilai_ (%) : ${qaBarScore > 0 ? `${qaBarScore.toFixed(1)}%` : '-'}
-_Parameters_: ${qaBarParam}
-- *Kitchen*
-_Nilai_ (%) : ${qaKitchenScore > 0 ? `${qaKitchenScore.toFixed(1)}%` : '-'}
-_Parameters_ : ${qaKitchenParam}
-*Total Nilai (%)*: ${qaTotalScore > 0 ? `${qaTotalScore.toFixed(1)}%` : '-'}
-*Status Parameters All Divisi* : ${qaAllStatus}`;
+  return text;
 };
 
 /**
- * Builds the complete WhatsApp report for ALL outlets under header *REKAPITULATION OUTLET*
+ * Builds report for a selected Area (e.g. JAKARTA, TANGGERANG, BEKASI)
+ */
+export const buildAreaWaReport = (
+  areaName: string,
+  selectedMonth: number,
+  selectedYear: number,
+  allOutletsData: Record<string, any>,
+  globalData?: AppState,
+  period: WaReportPeriod = 'MTD'
+): string => {
+  const activeAreas = getActiveRegionalAreas();
+  const outletList = activeAreas[areaName] || [];
+
+  if (outletList.length === 0) {
+    return `*REKAPITULATION OUTLET*\n*AREA* : ${areaName.toUpperCase()}\n\n_Tidak ada outlet aktif di area ini._`;
+  }
+
+  const sections = outletList.map((oName, idx) => {
+    return buildSingleOutletWaReport(oName, selectedMonth, selectedYear, allOutletsData, globalData, idx + 1, period, areaName);
+  });
+
+  return sections.join('\n\n==============================\n\n');
+};
+
+/**
+ * Builds the complete WhatsApp report for ALL outlets across all areas
  */
 export const buildAllOutletsWaReport = (
   selectedMonth: number,
   selectedYear: number,
   allOutletsData: Record<string, any>,
-  globalData: AppState,
-  targetOutlets?: string[]
+  globalData?: AppState,
+  targetOutlets?: string[],
+  period: WaReportPeriod = 'MTD'
 ): string => {
   const activeNames = targetOutlets && targetOutlets.length > 0
     ? targetOutlets
@@ -777,10 +879,45 @@ export const buildAllOutletsWaReport = (
       });
 
   const outletSections = activeNames.map((oName, idx) => {
-    return buildSingleOutletWaReport(oName, selectedMonth, selectedYear, allOutletsData, globalData, idx + 1);
+    const area = getAreaForOutlet(oName) || 'JAKARTA';
+    return buildSingleOutletWaReport(oName, selectedMonth, selectedYear, allOutletsData, globalData, idx + 1, period, area);
   });
 
-  return `*REKAPITULATION OUTLET*
+  return outletSections.join('\n\n==============================\n\n');
+};
 
-${outletSections.join('\n\n==============================\n\n')}`;
+export interface GenerateWaReportOptions {
+  allOutletsData: Record<string, any>;
+  selectedMonth: number;
+  selectedYear: number;
+  scope?: WaReportScope;
+  period?: WaReportPeriod;
+  targetOutlet?: string;
+  targetArea?: string;
+  globalData?: AppState;
+}
+
+/**
+ * High-level unified generator for WhatsApp report
+ */
+export const generateRegionalWaReport = ({
+  allOutletsData,
+  selectedMonth,
+  selectedYear,
+  scope = 'SELECTED',
+  period = 'MTD',
+  targetOutlet,
+  targetArea,
+  globalData,
+}: GenerateWaReportOptions): string => {
+  if (scope === 'SELECTED') {
+    const outlet = targetOutlet || getActiveOutletNames()[0] || 'SH CIPETE';
+    const area = targetArea || getAreaForOutlet(outlet) || 'JAKARTA';
+    return buildSingleOutletWaReport(outlet, selectedMonth, selectedYear, allOutletsData, globalData, 1, period, area);
+  }
+  if (scope === 'AREA') {
+    const area = targetArea || 'JAKARTA';
+    return buildAreaWaReport(area, selectedMonth, selectedYear, allOutletsData, globalData, period);
+  }
+  return buildAllOutletsWaReport(selectedMonth, selectedYear, allOutletsData, globalData, undefined, period);
 };

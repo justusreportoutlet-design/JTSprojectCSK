@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { AppState, LedgerItem, Outlet } from '../types';
-import { OUTLETS, INITIAL_STATE, getAreaForOutlet } from '../constants';
+import { OUTLETS, INITIAL_STATE, getAreaForOutlet, getActiveOutletNames, findOutletData, getOutletMonthData, extractAllGSIEntries } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import ShareActions from './ShareActions';
@@ -73,22 +73,46 @@ export const SummaryReportModule: React.FC<Props> = ({
   // Helper to extract app state for a specific outlet & month
   const getOutletMonthState = (outletName: string, mIdx: number = selectedMonth, yVal: number = selectedYear): AppState => {
     const mKey = `${yVal}-${String(mIdx + 1).padStart(2, '0')}`;
-    if (propSelectedOutlet && propSelectedOutlet !== 'ALL' && outletName === propSelectedOutlet) {
-      if (mIdx === currentMonthIdx && yVal === currentYear) {
-        return data;
-      }
+    const isCurrentLoggedInOutlet = propSelectedOutlet && propSelectedOutlet !== 'ALL' && 
+      outletName.trim().toUpperCase() === propSelectedOutlet.trim().toUpperCase();
+
+    if (isCurrentLoggedInOutlet && mIdx === currentMonthIdx && yVal === currentYear) {
+      return data;
     }
 
     if (allMonthlyData) {
-      // Structure 1: allMonthlyData[outlet][monthStr]
-      if ((allMonthlyData as any)[outletName]) {
-        const outletMap = (allMonthlyData as any)[outletName];
-        if (outletMap[String(mIdx)]) return outletMap[String(mIdx)];
-        if (outletMap[mKey]) return outletMap[mKey];
+      const outletData = findOutletData(allMonthlyData, outletName);
+      if (outletData) {
+        const mData = getOutletMonthData(outletData, mIdx, yVal) || {};
+        const allGsi = extractAllGSIEntries(outletData);
+        return {
+          ...INITIAL_STATE,
+          ...outletData,
+          ...mData,
+          dailyGSI: {
+            ...allGsi,
+            ...(outletData.dailyGSI || {}),
+            ...(mData.dailyGSI || {})
+          },
+          sales: {
+            ...(outletData.sales || {}),
+            ...(mData.sales || {}),
+            dailyRecording: {
+              ...(outletData.dailyRecording || {}),
+              ...((outletData.sales && outletData.sales.dailyRecording) || {}),
+              ...(mData.dailyRecording || {}),
+              ...((mData.sales && mData.sales.dailyRecording) || {})
+            }
+          },
+          expenses: {
+            ...(outletData.expenses || {}),
+            ...(mData.expenses || {})
+          }
+        } as AppState;
       }
 
       // Structure 2: if single-outlet view and outletName matches propSelectedOutlet
-      if (!isRegionalView && propSelectedOutlet && outletName === propSelectedOutlet) {
+      if (!isRegionalView && isCurrentLoggedInOutlet) {
         if ((allMonthlyData as any)[mKey]) {
           return (allMonthlyData as any)[mKey];
         }
@@ -98,7 +122,7 @@ export const SummaryReportModule: React.FC<Props> = ({
       }
     }
 
-    if (propSelectedOutlet && propSelectedOutlet !== 'ALL' && outletName === propSelectedOutlet && mIdx === currentMonthIdx && yVal === currentYear) {
+    if (isCurrentLoggedInOutlet && mIdx === currentMonthIdx && yVal === currentYear) {
       return data;
     }
 
@@ -139,9 +163,10 @@ export const SummaryReportModule: React.FC<Props> = ({
 
   // Calculate detailed summary per outlet (Strictly single outlet for login session, or all outlets for Regional)
   const outletSummaries = useMemo(() => {
+    const allKnownOutlets = Array.from(new Set([...getActiveOutletNames(), ...Object.keys(allMonthlyData || {})]));
     const targetOutlets = isRegionalView
-      ? (activeOutlet === 'ALL' || !activeOutlet ? OUTLETS : [activeOutlet as Outlet])
-      : [activeOutlet as Outlet];
+      ? (activeOutlet === 'ALL' || !activeOutlet ? allKnownOutlets : [activeOutlet])
+      : [activeOutlet];
 
     return targetOutlets.map(outletName => {
       const state = getOutletMonthState(outletName);
@@ -382,7 +407,8 @@ export const SummaryReportModule: React.FC<Props> = ({
 
   // Aggregated summary recap items for ALL OUTLETS
   const allOutletsRecapItems = useMemo<OutletSummaryRecapItem[]>(() => {
-    return OUTLETS.map((outletName, idx) => {
+    const allKnownOutlets = Array.from(new Set([...getActiveOutletNames(), ...Object.keys(allMonthlyData || {})]));
+    return allKnownOutlets.map((outletName, idx) => {
       const state = getOutletMonthState(outletName);
       
       // 1. Revenue & Budget

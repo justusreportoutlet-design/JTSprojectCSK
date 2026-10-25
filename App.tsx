@@ -1012,101 +1012,128 @@ const App: React.FC = () => {
     isHydrated.current = false;
     setIsRefreshing(true);
 
-    let cloudData = await fetchUserData(email, outlet);
-
-    const emailKey = email.toLowerCase();
+    const cleanEmail = (email || '').trim().toLowerCase();
     const outletKey = outlet;
-    const hasPending = safeStorage.getItem(`HAS_PENDING_SYNC_${emailKey}_${outletKey}`) === 'true';
 
-    if (hasPending) {
-      const pendingGlobalStr = safeStorage.getItem(`PENDING_SYNC_GLOBAL_${emailKey}_${outletKey}`);
-      const pendingOutletStr = safeStorage.getItem(`PENDING_SYNC_OUTLET_${emailKey}_${outletKey}`);
-      
-      if (pendingGlobalStr || pendingOutletStr) {
-        console.info("[Offline Recovery] Merging pending local data that failed to sync previously.");
-        if (!cloudData) {
-          cloudData = {};
-        }
+    try {
+      // 1. Ensure Firebase authentication is initialized (non-blocking race)
+      if (!auth.currentUser) {
         try {
-          if (pendingGlobalStr) {
-            const parsedGlobal = JSON.parse(pendingGlobalStr);
-            Object.keys(parsedGlobal).forEach(fKey => {
-              cloudData[fKey] = parsedGlobal[fKey];
-            });
-          }
-          if (pendingOutletStr) {
-            const parsedOutlet = JSON.parse(pendingOutletStr);
-            Object.keys(parsedOutlet).forEach(mKey => {
-              cloudData[mKey] = parsedOutlet[mKey];
-            });
-          }
-          showToast("Data tersimpan Anda telah berhasil disinkronkan ke Firebase.", "info");
-        } catch (e) {
-          console.error('[Offline Recovery] Error parsing pending sync data:', e);
+          const { signInAnonymously } = await import('firebase/auth');
+          await Promise.race([
+            signInAnonymously(auth),
+            new Promise(res => setTimeout(res, 2000))
+          ]);
+        } catch (authErr) {
+          console.warn('[handleLogin] Auth anonymous notice:', authErr);
         }
       }
-    }
 
-    if (cloudData) {
-      // Clean old/uninputted default logistics items permanently from fetched data
-      cloudData = cleanOutletDataOfDefaultLogistics(cloudData);
+      // 2. Fetch user data with 3.5s timeout safety to prevent infinite spinner
+      let cloudData: any = await Promise.race([
+        fetchUserData(cleanEmail, outletKey),
+        new Promise<any>((resolve) => {
+          setTimeout(() => {
+            console.warn('[handleLogin] fetchUserData timeout, proceeding with local fallback');
+            resolve(null);
+          }, 3500);
+        })
+      ]);
 
-      // Clean staffList in cloudData if exists
-      if (cloudData.staffList) {
-        const seen = new Set();
-        cloudData.staffList = cloudData.staffList
-          .sort(sortStaffList)
-          .filter((s: any) => {
-            if (seen.has(s.id)) return false;
-            seen.add(s.id);
-            return true;
-          })
-          .map((s: any) => {
-            const { leaveEntitlement, ...rest } = s;
-            return rest;
-          });
+      const hasPending = safeStorage.getItem(`HAS_PENDING_SYNC_${cleanEmail}_${outletKey}`) === 'true';
+
+      if (hasPending) {
+        const pendingGlobalStr = safeStorage.getItem(`PENDING_SYNC_GLOBAL_${cleanEmail}_${outletKey}`);
+        const pendingOutletStr = safeStorage.getItem(`PENDING_SYNC_OUTLET_${cleanEmail}_${outletKey}`);
+        
+        if (pendingGlobalStr || pendingOutletStr) {
+          console.info("[Offline Recovery] Merging pending local data that failed to sync previously.");
+          if (!cloudData) {
+            cloudData = {};
+          }
+          try {
+            if (pendingGlobalStr) {
+              const parsedGlobal = JSON.parse(pendingGlobalStr);
+              Object.keys(parsedGlobal).forEach(fKey => {
+                cloudData[fKey] = parsedGlobal[fKey];
+              });
+            }
+            if (pendingOutletStr) {
+              const parsedOutlet = JSON.parse(pendingOutletStr);
+              Object.keys(parsedOutlet).forEach(mKey => {
+                cloudData[mKey] = parsedOutlet[mKey];
+              });
+            }
+            showToast("Data tersimpan Anda telah berhasil disinkronkan ke Firebase.", "info");
+          } catch (e) {
+            console.error('[Offline Recovery] Error parsing pending sync data:', e);
+          }
+        }
       }
 
-      const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, guestComplaints, affiliateHistory, ...rest } = cloudData;
-      
-      const hydratedGlobal: any = {
-        staffList: staffList || INITIAL_STATE.staffList,
-        leaveRecords: leaveRecords || INITIAL_STATE.leaveRecords,
-        dailyOvertime: dailyOvertime || INITIAL_STATE.dailyOvertime,
-        dailyAttendance: dailyAttendance || INITIAL_STATE.dailyAttendance,
-        dailyExternalAudit: dailyExternalAudit || {},
-        dailyCPA: dailyCPA || {},
-        guestComplaints: guestComplaints || [],
-        affiliateHistory: affiliateHistory || []
-      };
+      if (cloudData) {
+        // Clean old/uninputted default logistics items permanently from fetched data
+        cloudData = cleanOutletDataOfDefaultLogistics(cloudData);
 
-      setGlobalDataState(hydratedGlobal);
-      setOutletMonthlyData(rest || {});
+        // Clean staffList in cloudData if exists
+        if (cloudData.staffList) {
+          const seen = new Set();
+          cloudData.staffList = cloudData.staffList
+            .sort(sortStaffList)
+            .filter((s: any) => {
+              if (seen.has(s.id)) return false;
+              seen.add(s.id);
+              return true;
+            })
+            .map((s: any) => {
+              const { leaveEntitlement, ...rest } = s;
+              return rest;
+            });
+        }
 
-      // Build initial sync hashes
-      const globalFieldsList = ['staffList', 'leaveRecords', 'dailyOvertime', 'weeklyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'guestComplaints', 'affiliateHistory', 'manpowerData'];
-      const nextGlobalHashes: Record<string, string> = {};
-      globalFieldsList.forEach(field => {
-        nextGlobalHashes[field] = JSON.stringify((hydratedGlobal as any)[field]);
-      });
-      lastSyncedGlobal.current = nextGlobalHashes;
+        const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, guestComplaints, affiliateHistory, ...rest } = cloudData;
+        
+        const hydratedGlobal: any = {
+          staffList: staffList || INITIAL_STATE.staffList,
+          leaveRecords: leaveRecords || INITIAL_STATE.leaveRecords,
+          dailyOvertime: dailyOvertime || INITIAL_STATE.dailyOvertime,
+          dailyAttendance: dailyAttendance || INITIAL_STATE.dailyAttendance,
+          dailyExternalAudit: dailyExternalAudit || {},
+          dailyCPA: dailyCPA || {},
+          guestComplaints: guestComplaints || [],
+          affiliateHistory: affiliateHistory || []
+        };
 
-      const nextOutletHashes: Record<string, string> = {};
-      Object.keys(rest || {}).forEach(monthKey => {
-        nextOutletHashes[monthKey] = JSON.stringify(rest[monthKey]);
-      });
-      lastSyncedOutlet.current = nextOutletHashes;
-      isHydrated.current = true;
+        setGlobalDataState(hydratedGlobal);
+        setOutletMonthlyData(rest || {});
+
+        // Build initial sync hashes
+        const globalFieldsList = ['staffList', 'leaveRecords', 'dailyOvertime', 'weeklyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'guestComplaints', 'affiliateHistory', 'manpowerData'];
+        const nextGlobalHashes: Record<string, string> = {};
+        globalFieldsList.forEach(field => {
+          nextGlobalHashes[field] = JSON.stringify((hydratedGlobal as any)[field]);
+        });
+        lastSyncedGlobal.current = nextGlobalHashes;
+
+        const nextOutletHashes: Record<string, string> = {};
+        Object.keys(rest || {}).forEach(monthKey => {
+          nextOutletHashes[monthKey] = JSON.stringify(rest[monthKey]);
+        });
+        lastSyncedOutlet.current = nextOutletHashes;
+        isHydrated.current = true;
+      }
+    } catch (loginError) {
+      console.warn('[handleLogin] Notice during login data hydration:', loginError);
+    } finally {
+      setUser({ email: cleanEmail, isLoggedIn: true, selectedOutlet: outletKey });
+      setIsPublicView(false);
+      safeStorage.setItem('BARN_USER_SESSION', cleanEmail);
+      safeStorage.setItem('MANUAL_USER_EMAIL', cleanEmail);
+      safeStorage.setItem('BARN_SELECTED_OUTLET', outletKey);
+
+      setSyncStatus('online');
+      setIsRefreshing(false);
     }
-
-    setUser({ email, isLoggedIn: true, selectedOutlet: outlet });
-    setIsPublicView(false);
-    safeStorage.setItem('BARN_USER_SESSION', email);
-    safeStorage.setItem('MANUAL_USER_EMAIL', email);
-    safeStorage.setItem('BARN_SELECTED_OUTLET', outlet);
-
-    setSyncStatus('online');
-    setIsRefreshing(false);
   };
 
   const forceSync = useCallback(async () => {

@@ -7,7 +7,9 @@ import {
   QA_PASSING_TIERS, 
   getQaScoreTier,
   getActiveOutletNames,
-  getActiveRegionalAreas
+  getActiveRegionalAreas,
+  findOutletData,
+  getOutletMonthData
 } from '../constants';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -121,14 +123,14 @@ export const RegionalQARecapTable: React.FC<Props> = ({
   const outletQARecords = useMemo<OutletQuarterlyQARow[]>(() => {
     return targetOutlets.map(outletName => {
       const area = getAreaForOutlet(outletName) || 'JAKARTA';
-      const outletRawData = allOutletsData?.[outletName] || {};
+      const outletRawData = findOutletData(allOutletsData, outletName) || {};
 
       const monthsResult: OutletMonthlyQAResult[] = quarterMonthIndices.map(mIdx => {
         const monthPrefix = `${qaYear}-${String(mIdx + 1).padStart(2, '0')}`;
         const auditsMap: Record<string, QAData> = {};
 
         // 1. From allOutletsData[outletName]
-        const mData = outletRawData[String(mIdx)] || outletRawData[mIdx] || {};
+        const mData = getOutletMonthData(outletRawData, mIdx, qaYear) || {};
         if (mData?.dailyQA) {
           Object.entries(mData.dailyQA).forEach(([d, q]) => {
             if (d.startsWith(monthPrefix) && q) auditsMap[d] = q as QAData;
