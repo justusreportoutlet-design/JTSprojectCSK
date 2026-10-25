@@ -369,14 +369,17 @@ export const buildSingleOutletWaReport = (
       return s.division === div;
     });
     const slots = divSecs.flatMap(s => s.slots).filter(sl => sl.status === status);
-    if (slots.length === 0) return '-\n';
+    const bullet = status === 'VACANT_OPEN' ? '*' : (div === 'SERVICE' ? '*' : '-');
+    if (slots.length === 0) {
+      return status === 'VACANT_OPEN' ? '* ' : (div === 'SERVICE' ? '* ' : '-');
+    }
     
     const map: Record<string, number> = {};
     slots.forEach(s => {
       const role = (s.position || 'Staff').trim();
       map[role] = (map[role] || 0) + 1;
     });
-    return Object.entries(map).map(([r, c]) => `- ${c} ${r}`).join('\n');
+    return Object.entries(map).map(([r, c]) => `${bullet} ${c} ${r}`).join('\n');
   };
 
   // Kitchen
@@ -605,28 +608,30 @@ export const buildSingleOutletWaReport = (
   addVoids(monthDoc.dailyVoidBills || outletDoc.dailyVoidBills);
   addVoids(monthDoc.voidBills || outletDoc.voidBills);
 
-  const staffVoidMap = new Map<string, { name: string; count: number; total: number; reasons: Set<string> }>();
+  const staffVoidMap = new Map<string, Array<{ amount: number; reason: string }>>();
   voidRecords.forEach(r => {
     const sName = (r.staffName || (r as any).name || 'Staff').trim();
     if (!staffVoidMap.has(sName)) {
-      staffVoidMap.set(sName, { name: sName, count: 0, total: 0, reasons: new Set<string>() });
+      staffVoidMap.set(sName, []);
     }
-    const entry = staffVoidMap.get(sName)!;
-    entry.count += 1;
-    entry.total += Number(r.amount) || Number((r as any).price) || Number((r as any).totalPrice) || 0;
-    if (r.reason) entry.reasons.add(r.reason);
+    const amt = Number(r.amount) || Number((r as any).price) || Number((r as any).totalPrice) || 0;
+    const rsn = r.reason || (r as any).notes || (r as any).keterangan || '-';
+    staffVoidMap.get(sName)!.push({ amount: amt, reason: rsn });
   });
 
-  const staffVoidList = Array.from(staffVoidMap.values()).sort((a, b) => b.count - a.count);
+  const staffVoidList = Array.from(staffVoidMap.entries()).sort((a, b) => b[1].length - a[1].length);
   let voidBillSectionText = '';
   if (staffVoidList.length > 0) {
-    voidBillSectionText = staffVoidList.map((st, idx) => {
-      const reasonStr = Array.from(st.reasons).join(', ') || '-';
-      const repeatTag = st.count > 1 ? ` (${st.count}x Kesalahan)` : '';
-      return `_${idx + 1}. Nama Staff_: ${st.name}${repeatTag}\n_Total Kesalahan_: ${st.count}\n_Total Price_: Rp. ${formatIDR(st.total)}\n_Reason_: ${reasonStr}`;
+    voidBillSectionText = staffVoidList.map(([name, errs], idx) => {
+      const repeatTag = ` (${errs.length}x Kesalahan)`;
+      const staffHeader = `_${idx + 1}. Nama Staff_: ${name}${repeatTag}`;
+      const errsText = errs.map((err, eIdx) => {
+        return `_Kesalahan ${eIdx + 1}_\n_Total Price_: Rp. ${formatIDR(err.amount)}\n_Reason_: ${err.reason}`;
+      }).join('\n\n');
+      return `${staffHeader}\n${errsText}`;
     }).join('\n\n');
   } else {
-    voidBillSectionText = `_1. Nama Staff_:\n_Total Kesalahan_:\n_Total Price_:\n_Reason_:`;
+    voidBillSectionText = `_1. Nama Staff_:\n_Kesalahan 1_\n_Total Price_: Rp. 0\n_Reason_: -`;
   }
 
   // ==========================================
@@ -686,67 +691,67 @@ export const buildSingleOutletWaReport = (
 
   // *REVENUE*
   text += `*REVENUE*\n`;
-  text += `- MTD Revenue : Rp. ${formatIDR(totalActualRevenue)}\n`;
-  text += `- MTD Budget Revenue : Rp. ${formatIDR(mtdBudgetRevenue)}\n`;
-  text += `- Variance : ${revVariance >= 0 ? '+' : '-'}Rp. ${formatIDR(Math.abs(revVariance))}\n`;
-  text += `- MTD Forecast : Rp. ${formatIDR(mtdForecast)}\n\n`;
+  text += `* MTD Revenue : Rp. ${formatIDR(totalActualRevenue)}\n`;
+  text += `* MTD Budget Revenue : Rp. ${formatIDR(mtdBudgetRevenue)}\n`;
+  text += `* Variance MTD Budget : ${revVariance < 0 ? '-Rp. ' : 'Rp. '}${formatIDR(Math.abs(revVariance))}\n`;
+  text += `* MTD Forecast : Rp. ${formatIDR(mtdForecast)}\n\n`;
 
-  text += `- Total Revenue Weekdays : Rp. ${formatIDR(totalRevenueWeekdays)}\n`;
-  text += `- Total Revenue Weekend : Rp. ${formatIDR(totalRevenueWeekend)}\n`;
-  text += `- Rata² Revenue Weekdays : Rp. ${formatIDR(avgRevWeekdays)}\n`;
-  text += `- Rata² Revenue Weekend : Rp. ${formatIDR(avgRevWeekend)}\n`;
-  text += `- MTD Rata" Contribution Lunch : ${lunchContribPct.toFixed(1)}%\n`;
-  text += `- MTD Rata" Contribution Dinner : ${dinnerContribPct.toFixed(1)}%\n\n`;
+  text += `* Total Revenue Weekdays : Rp. ${formatIDR(totalRevenueWeekdays)}\n`;
+  text += `* Total Revenue Weekend : Rp. ${formatIDR(totalRevenueWeekend)}\n`;
+  text += `* Rata² Revenue Weekdays : Rp. ${formatIDR(avgRevWeekdays)}\n`;
+  text += `* Rata² Revenue Weekend : Rp. ${formatIDR(avgRevWeekend)}\n`;
+  text += `* MTD Rata" Contribution Lunch : ${lunchContribPct.toFixed(1)}%\n`;
+  text += `* MTD Rata" Contribution Dinner : ${dinnerContribPct.toFixed(1)}%\n\n`;
 
   // *BELANJA*
   text += `*BELANJA*\n`;
-  text += `- Main Store : Rp. ${formatIDR(belanjaMainStore)}\n`;
-  text += `- Main Kitchen : Rp. ${formatIDR(belanjaMainKitchen)}\n`;
-  text += `- Supplier : Rp. ${formatIDR(belanjaSupplier)}\n`;
-  text += `- Cash : Rp. ${formatIDR(belanjaCash)} (Commodity Expense)\n`;
-  text += `- Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
-  text += `- Food Cost : ${foodCostPct.toFixed(2)}%\n\n`;
+  text += `* Main Store : Rp. ${formatIDR(belanjaMainStore)}\n`;
+  text += `* Main Kitchen : Rp. ${formatIDR(belanjaMainKitchen)}\n`;
+  text += `* Supplier : Rp. ${formatIDR(belanjaSupplier)}\n`;
+  text += `* Cash : Rp. ${formatIDR(belanjaCash)} (Commodity Expense)\n`;
+  text += `* Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `* Food Cost : ${foodCostPct.toFixed(2)}%\n\n`;
 
   // *COGS ACTUAL*
   text += `*COGS ACTUAL*\n`;
-  text += `- Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
-  text += `- Actual Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
-  text += `- Rnd : Rp. ${formatIDR(rnd)}\n`;
-  text += `- Wrongmaker : Rp. ${formatIDR(wrongmaker)}\n`;
-  text += `- Budget Marketing/KOL : Rp. ${formatIDR(budgetMarketing)}\n`;
-  text += `- Ending Inventory : Rp. ${formatIDR(endingInventory)}\n`;
-  text += `- COGS Actual : Rp ${formatIDR(cogsActual)}\n`;
-  text += `- COGS (%) : ${cogsActualPct.toFixed(2)}%\n`;
-  text += `- FOOD COST (%) : ${foodCostPct.toFixed(2)}%\n\n`;
+  text += `* Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
+  text += `* Actual Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `* Rnd : Rp. ${formatIDR(rnd)}\n`;
+  text += `* Wrongmaker : Rp. ${formatIDR(wrongmaker)}\n`;
+  text += `* Budget Marketing/KOL : Rp. ${formatIDR(budgetMarketing)}\n`;
+  text += `* Ending Inventory : Rp. ${formatIDR(endingInventory)}\n`;
+  text += `* COGS Actual : Rp. ${formatIDR(cogsActual)}\n`;
+  text += `* COGS (%) : ${cogsActualPct.toFixed(2)}%\n`;
+  text += `* FOOD COST (%) : ${foodCostPct.toFixed(2)}%\n\n`;
 
   // *COGS PROJECTION*
   text += `*COGS PROJECTION*\n`;
-  text += `- Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
-  text += `- Budget Belanja : Rp. ${formatIDR(budgetBelanja)}\n`;
-  text += `- Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
-  text += `- Sisa Belanja : Rp. ${formatIDR(sisaBelanja)}\n`;
-  text += `- Closing Inventory : Rp. ${formatIDR(simulatedClosing)}\n`;
-  text += `- COGS Actual : Rp. ${formatIDR(cogsProjected)}\n`;
-  text += `- COGS (%) : ${cogsProjectedPct.toFixed(2)}%\n\n`;
+  text += `* Begin Inventory : Rp. ${formatIDR(beginInventory)}\n`;
+  text += `* Budget Belanja : Rp. ${formatIDR(budgetBelanja)}\n`;
+  text += `* Total Belanja : Rp. ${formatIDR(totalBelanja)}\n`;
+  text += `* Sisa Belanja : Rp. ${formatIDR(sisaBelanja)}\n`;
+  text += `* Closing Inventory : Rp. ${formatIDR(simulatedClosing)}\n`;
+  text += `* COGS Actual : Rp. ${formatIDR(cogsProjected)}\n`;
+  text += `* COGS (%) : ${cogsProjectedPct.toFixed(2)}%\n\n`;
 
   // *OVERTIME* (Cut Off 26 - 25)
   text += `*OVERTIME*\n`;
   text += `TOTAL MANA POWER : ${totalManPower} Orang\n`;
-  text += `- *Kitchen* : ${kStaffDivCount} Orang\n`;
+  text += `* *Kitchen* : ${kStaffDivCount} Orang\n`;
   text += `_Week 1_: ${formatOtHours(kWeeklyHours[0])}\n`;
   text += `_Week 2_: ${formatOtHours(kWeeklyHours[1])}\n`;
   text += `_Week 3_: ${formatOtHours(kWeeklyHours[2])}\n`;
   text += `_Week 4_: ${formatOtHours(kWeeklyHours[3])}\n`;
   text += `_Total Overtime_ : ${formatOtHours(kTotalHours)}\n\n`;
 
-  text += `- *Bar* : ${bStaffDivCount} Orang\n`;
+  text += `* *Bar* : ${bStaffDivCount} Orang\n`;
   text += `_Week 1_: ${formatOtHours(bWeeklyHours[0])}\n`;
   text += `_Week 2_: ${formatOtHours(bWeeklyHours[1])}\n`;
   text += `_Week 3_: ${formatOtHours(bWeeklyHours[2])}\n`;
   text += `_Week 4_: ${formatOtHours(bWeeklyHours[3])}\n`;
   text += `_Total Overtime_ : ${formatOtHours(bTotalHours)}\n\n`;
 
-  text += `- *Service*: ${sStaffDivCount} Orang\n`;
+  text += `* *Service*: ${sStaffDivCount} Orang\n`;
   text += `_Week 1_: ${formatOtHours(sWeeklyHours[0])}\n`;
   text += `_Week 2_: ${formatOtHours(sWeeklyHours[1])}\n`;
   text += `_Week 3_: ${formatOtHours(sWeeklyHours[2])}\n`;
@@ -764,13 +769,13 @@ export const buildSingleOutletWaReport = (
   text += `_Steward_ : ${kSteward}\n`;
   text += `_Store Keeper_: ${kStore}\n`;
   text += `*Vacant Open*\n${kVacantOpen}\n`;
-  text += `*Vacant Hold*\n${kVacantHold}\n\n\n`;
+  text += `*Vacant Hold*\n${kVacantHold}\n\n\n\n`;
 
   text += `*Bar*: ${bStaffDivCount} Orang\n`;
   text += `_Leader_: ${bLeader}\n`;
   text += `_Barista_: ${bBarista}\n`;
   text += `*Vacant Open*\n${bVacantOpen}\n`;
-  text += `*Vacant Hold*\n${bVacantHold}\n\n`;
+  text += `*Vacant Hold*\n${bVacantHold}\n\n\n`;
 
   text += `*Service* : ${sStaffDivCount} Orang\n`;
   text += `_Leader_ : ${sLeader}\n`;
@@ -783,54 +788,51 @@ export const buildSingleOutletWaReport = (
 
   // *GOOGLE REVIEW*
   text += `*GOOGLE REVIEW*\n`;
-  text += `- Total Review : ${totalReviewMtd} Review\n`;
-  text += `- Total Rating : ${currentRating > 0 ? `${currentRating.toFixed(2)} ⭐` : '0 ⭐'}\n`;
-  text += `- Variance Total MTD Review VS Last Month : ${varianceReview >= 0 ? '+' : ''}${varianceReview} Review\n`;
-  text += `- Variance MTD Total Rating Vs Last Month : ${varianceRating >= 0 ? '+' : ''}${varianceRating.toFixed(2)} ⭐\n\n`;
+  text += `* Total Review : ${totalReviewMtd} Review\n`;
+  text += `* Total Rating : ${currentRating > 0 ? `${currentRating.toFixed(2)} ⭐` : '0 ⭐'}\n`;
+  text += `* Variance Total MTD Review VS Last Month : ${varianceReview >= 0 ? '+' : ''}${varianceReview} Review\n`;
+  text += `* Variance MTD Total Rating Vs Last Month : ${varianceRating >= 0 ? '+' : ''}${varianceRating.toFixed(2)} ⭐\n\n`;
 
   // *GSI*
   text += `*GSI*\n`;
-  text += `- Total Review : ${gsiTotalResponses} Review\n`;
-  text += `- Performance : ${gsiPerformance.toFixed(1)}%\n`;
-  text += `- Variance MTD Total Review Vs MTD Last Month : ${varGsiResponses >= 0 ? '+' : ''}${varGsiResponses} Review\n`;
-  text += `- Variance MTD Performance Vs MTD Last Month : ${varGsiPerf >= 0 ? '+' : ''}${varGsiPerf.toFixed(1)}%\n`;
-  text += `- Performance (%) : ${gsiPerformance.toFixed(1)}%\n\n`;
+  text += `* Total Review : ${gsiTotalResponses} Review\n`;
+  text += `* Performance : ${gsiPerformance.toFixed(1)}%\n`;
+  text += `* Variance MTD Total Review Vs MTD Last Month : ${varGsiResponses >= 0 ? '+' : ''}${varGsiResponses} Review\n`;
+  text += `* Variance MTD Performance Vs MTD Last Month : ${varGsiPerf >= 0 ? '+' : ''}${varGsiPerf.toFixed(1)}%\n`;
+  text += `* Performance (%) : ${gsiPerformance.toFixed(1)}%\n\n`;
 
   // *CITY LEDGER*
   text += `*CITY LEDGER*\n`;
-  text += `- Total Price : Rp. ${formatIDR(cityLedgerData.total)}\n`;
+  text += `* Total Price : Rp. ${formatIDR(cityLedgerData.total)}\n`;
   text += `${formatLedgerLines(cityLedgerData)}\n\n`;
 
   // *GUEST SATISFACTION*
   text += `*GUEST SATISFACTION*\n`;
-  text += `- Total Price : Rp. ${formatIDR(guestSatData.total)}\n`;
+  text += `* Total Price : Rp. ${formatIDR(guestSatData.total)}\n`;
   text += `${formatLedgerLines(guestSatData)}\n\n`;
 
   // *COMPLIMENTARY*
   text += `*COMPLIMENTARY*\n`;
-  text += `- Total Price : Rp. ${formatIDR(compData.total)}\n`;
+  text += `* Total Price : Rp. ${formatIDR(compData.total)}\n`;
   text += `${formatLedgerLines(compData)}\n\n\n`;
 
   // *VOID BIL*
   text += `*VOID BIL*\n`;
   text += `${voidBillSectionText}\n\n`;
-  text += `(Tampilkan Summary Nama staff yang melakukan lebih dari satu kali kesalahan termasuk Total Price dan Reasonnya)\n\n`;
 
   // *QA REPORT*
   text += `*QA REPORT* (Parameters To Improve, Satisfactory / Excellent)\n\n`;
-  text += `- *Service* \n`;
+  text += `* *Service* \n`;
   text += `_Nilai_ (%) : ${qaServiceScore > 0 ? `${qaServiceScore.toFixed(1)}%` : '0%'}\n`;
   text += `_Parameters_: ${qaServiceParam}\n`;
-  text += `- *Bar* :\n`;
+  text += `* *Bar* :\n`;
   text += `_Nilai_ (%) : ${qaBarScore > 0 ? `${qaBarScore.toFixed(1)}%` : '0%'}\n`;
   text += `_Parameters_: ${qaBarParam}\n`;
-  text += `- *Kitchen*\n`;
+  text += `* *Kitchen*\n`;
   text += `_Nilai_ (%) : ${qaKitchenScore > 0 ? `${qaKitchenScore.toFixed(1)}%` : '0%'}\n`;
   text += `_Parameters_ : ${qaKitchenParam}\n`;
   text += `*Total Nilai Outlet (%)*: ${qaTotalScore > 0 ? `${qaTotalScore.toFixed(1)}%` : '0%'}\n`;
-  text += `*Status Parameters All Divisi* : ${qaAllStatus}\n\n`;
-
-  text += `NOTES FONT :\nBOLD TEBAL\nGARIS BAWAH MIRING`;
+  text += `*Status Parameters All Divisi* : ${qaAllStatus}`;
 
   return text;
 };
