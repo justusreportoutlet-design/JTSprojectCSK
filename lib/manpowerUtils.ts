@@ -214,12 +214,18 @@ export interface DivisionSummaryRow {
 }
 
 export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
-  const sections = manpowerData.sections || [];
-  const externalEntries = manpowerData.externalEntries || [];
+  const sections = manpowerData?.sections || [];
+  const externalEntries = manpowerData?.externalEntries || [];
+  const customPrevBudgets = manpowerData?.previousBudgets || {};
 
-  // Rules:
-  // Store Keeper -> KITCHEN
-  // Public Area In-House -> SERVICE
+  // Department Breakdown Rules:
+  // - Kitchen row: Pure kitchen ONLY (Kitchen Leader, Grill, Asian, Fryer, Preparation, etc.)
+  // - Steward row: Steward department
+  // - Store Keeper row: Store Keeper department
+  // - Service row: Pure service (Service Leader, Greeter, Cashier, Checker, Server, etc.)
+  // - Public Area row: Public Attendant / Public Area in-house
+  // - Bar row: Bar / Barista
+  // - Total row: Combined sum of all departments (Service + Bar + Kitchen + Steward + Store Keeper + PA)
 
   let serviceBudget = 0;
   let serviceActual = 0;
@@ -243,38 +249,34 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
   let totalVacantHold = 0;
 
   sections.forEach(sec => {
-    const secName = sec.name.toUpperCase();
-    const actualCount = sec.slots.filter(s => s.status === 'FILLED').length;
-    const vOpen = sec.slots.filter(s => s.status === 'VACANT_OPEN').length;
-    const vHold = sec.slots.filter(s => s.status === 'VACANT_HOLD').length;
+    const secName = (sec.name || '').toUpperCase();
+    const actualCount = (sec.slots || []).filter(s => s.status === 'FILLED').length;
+    const vOpen = (sec.slots || []).filter(s => s.status === 'VACANT_OPEN').length;
+    const vHold = (sec.slots || []).filter(s => s.status === 'VACANT_HOLD').length;
 
     totalVacantOpen += vOpen;
     totalVacantHold += vHold;
 
-    if (secName.includes('STORE KEEPER') || secName.includes('STOREKEEPER')) {
-      storekeeperBudget += sec.budget;
+    // Check Steward & Storekeeper FIRST before general kitchen
+    if (secName.includes('STORE KEEPER') || secName.includes('STOREKEEPER') || sec.id === 'sec_store_keeper') {
+      storekeeperBudget += Number(sec.budget) || 0;
       storekeeperActual += actualCount;
-      kitchenBudget += sec.budget;
-      kitchenActual += actualCount;
-    } else if (secName.includes('STEWARD')) {
-      stewardBudget += sec.budget;
+    } else if (secName.includes('STEWARD') || sec.id === 'sec_steward') {
+      stewardBudget += Number(sec.budget) || 0;
       stewardActual += actualCount;
-      kitchenBudget += sec.budget;
-      kitchenActual += actualCount;
-    } else if (secName.includes('PUBLIC AREA') || secName.includes('PUBLIC ATTENDANT')) {
-      paBudget += sec.budget;
+    } else if (secName.includes('PUBLIC AREA') || secName.includes('PUBLIC ATTENDANT') || sec.id === 'sec_public_area') {
+      paBudget += Number(sec.budget) || 0;
       paActual += actualCount;
-      serviceBudget += sec.budget;
-      serviceActual += actualCount;
     } else if (sec.division === 'BAR') {
-      barBudget += sec.budget;
+      barBudget += Number(sec.budget) || 0;
       barActual += actualCount;
     } else if (sec.division === 'KITCHEN') {
-      kitchenBudget += sec.budget;
+      // Pure Kitchen only (excluding Steward and Store Keeper)
+      kitchenBudget += Number(sec.budget) || 0;
       kitchenActual += actualCount;
     } else {
-      // SERVICE
-      serviceBudget += sec.budget;
+      // Pure Service only (excluding Public Area)
+      serviceBudget += Number(sec.budget) || 0;
       serviceActual += actualCount;
     }
   });
@@ -288,10 +290,16 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
   });
 
   const totalInhouseBudget = sections.reduce((acc, s) => acc + (Number(s.budget) || 0), 0);
-  const totalInhouseActual = sections.reduce((acc, s) => acc + s.slots.filter(slot => slot.status === 'FILLED').length, 0);
+  const totalInhouseActual = sections.reduce((acc, s) => acc + (s.slots || []).filter(slot => slot.status === 'FILLED').length, 0);
   const totalInhouseVariance = totalInhouseActual - totalInhouseBudget;
 
-  const previousBudgetTotal = manpowerData.previousBudgetTotal || 45;
+  // Previous Budgets per department
+  const prevService = customPrevBudgets['SERVICE'] !== undefined ? Number(customPrevBudgets['SERVICE']) : 16;
+  const prevBar = customPrevBudgets['BAR'] !== undefined ? Number(customPrevBudgets['BAR']) : 4;
+  const prevKitchen = customPrevBudgets['KITCHEN'] !== undefined ? Number(customPrevBudgets['KITCHEN']) : 11;
+  const prevSteward = customPrevBudgets['STEWARD'] !== undefined ? Number(customPrevBudgets['STEWARD']) : 4;
+  const prevStorekeeper = customPrevBudgets['STOREKEEPER'] !== undefined ? Number(customPrevBudgets['STOREKEEPER']) : 1;
+  const prevPA = customPrevBudgets['PUBLIC_AREA'] !== undefined ? Number(customPrevBudgets['PUBLIC_AREA']) : 2;
 
   const rows: DivisionSummaryRow[] = [
     {
@@ -301,7 +309,7 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: serviceBudget,
       actual: serviceActual,
       variance: serviceActual - serviceBudget,
-      previousBudget: 18
+      previousBudget: prevService
     },
     {
       no: 2,
@@ -310,7 +318,7 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: barBudget,
       actual: barActual,
       variance: barActual - barBudget,
-      previousBudget: 4
+      previousBudget: prevBar
     },
     {
       no: 3,
@@ -319,7 +327,7 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: kitchenBudget,
       actual: kitchenActual,
       variance: kitchenActual - kitchenBudget,
-      previousBudget: 16
+      previousBudget: prevKitchen
     },
     {
       no: 4,
@@ -328,7 +336,7 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: stewardBudget,
       actual: stewardActual,
       variance: stewardActual - stewardBudget,
-      previousBudget: 4
+      previousBudget: prevSteward
     },
     {
       no: 5,
@@ -337,7 +345,7 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: storekeeperBudget,
       actual: storekeeperActual,
       variance: storekeeperActual - storekeeperBudget,
-      previousBudget: 1
+      previousBudget: prevStorekeeper
     },
     {
       no: 6,
@@ -346,9 +354,18 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
       currentBudget: paBudget,
       actual: paActual,
       variance: paActual - paBudget,
-      previousBudget: 2
+      previousBudget: prevPA
     }
   ];
+
+  // Total Previous Budget: sum of all department rows
+  const sumRowsPreviousBudget = rows.reduce((acc, r) => acc + (Number(r.previousBudget) || 0), 0);
+  const previousBudgetTotal = sumRowsPreviousBudget;
+
+  const totalKitchenCombinedBudget = kitchenBudget + stewardBudget + storekeeperBudget;
+  const totalKitchenCombinedActual = kitchenActual + stewardActual + storekeeperActual;
+  const totalServiceCombinedBudget = serviceBudget + paBudget;
+  const totalServiceCombinedActual = serviceActual + paActual;
 
   return {
     rows,
@@ -363,10 +380,18 @@ export const calculateManpowerSummary = (manpowerData: OutletManpowerData) => {
     kitchenVariance: kitchenActual - kitchenBudget,
     stewardBudget,
     stewardActual,
+    stewardVariance: stewardActual - stewardBudget,
     storekeeperBudget,
     storekeeperActual,
+    storekeeperVariance: storekeeperActual - storekeeperBudget,
     paBudget,
     paActual,
+    paVariance: paActual - paBudget,
+    // Combined for compatibility
+    totalKitchenCombinedBudget,
+    totalKitchenCombinedActual,
+    totalServiceCombinedBudget,
+    totalServiceCombinedActual,
     externalBudget,
     externalActual,
     externalVariance: externalActual - externalBudget,

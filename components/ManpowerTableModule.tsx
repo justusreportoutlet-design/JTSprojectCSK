@@ -490,6 +490,21 @@ export const ManpowerTableModule: React.FC<Props> = ({
     }
   };
 
+  // Update Previous Budget per Department
+  const handlePreviousBudgetChange = (divisionCode: string, value: number) => {
+    const updatedPrevBudgets = {
+      ...(manpowerState.previousBudgets || {}),
+      [divisionCode]: Math.max(0, value)
+    };
+    const updatedData: OutletManpowerData = {
+      ...manpowerState,
+      previousBudgets: updatedPrevBudgets,
+      updatedAt: new Date().toISOString()
+    };
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
+  };
+
   // Export to Excel
   const handleExportExcel = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -581,7 +596,7 @@ export const ManpowerTableModule: React.FC<Props> = ({
     worksheet.addRow([]);
 
     // Summary Table Header
-    const sumHeader = worksheet.addRow(['NO', `DEPARTMENT / ${selectedOutlet}`, 'CURRENT BUDGET', 'BUDGET', 'VARIANCE', 'PREVIOUS BUDGET']);
+    const sumHeader = worksheet.addRow(['NO', `DEPARTMENT / ${selectedOutlet}`, 'CURRENT BUDGET', 'ACTUAL', 'VARIANCE', 'PREVIOUS BUDGET']);
     sumHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sumHeader.eachCell(cell => {
       cell.fill = {
@@ -599,15 +614,20 @@ export const ManpowerTableModule: React.FC<Props> = ({
     sumHeader.getCell(3).font = { bold: true, color: { argb: 'FF000000' } };
 
     summary.rows.forEach(r => {
-      worksheet.addRow([r.no, r.name, '', r.currentBudget, r.variance, r.previousBudget]);
+      worksheet.addRow([r.no, r.name, r.currentBudget, r.actual, r.variance, r.previousBudget]);
     });
+
+    // If external entries exist
+    if (summary.externalBudget > 0) {
+      worksheet.addRow([7, 'MANPOWER EXTERNAL (CASUAL / OUTSOURCING)', summary.externalBudget, summary.externalActual, summary.externalVariance, '-']);
+    }
 
     // Total Row
     const totalRow = worksheet.addRow([
       '',
       'TOTAL',
       summary.totalInhouseBudget,
-      '',
+      summary.totalInhouseActual,
       summary.totalInhouseVariance,
       summary.previousBudgetTotal
     ]);
@@ -1350,7 +1370,29 @@ export const ManpowerTableModule: React.FC<Props> = ({
                 <tr key={row.no} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                   <td className="px-4 py-3 text-center text-slate-500">{row.no}</td>
                   <td className="px-4 py-3 font-black tracking-wide text-slate-900 dark:text-white uppercase">
-                    {row.name}
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{row.name}</span>
+                      {row.divisionCode === 'KITCHEN' && (
+                        <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 px-1.5 py-0.5 rounded capitalize">
+                          Murni (Tanpa Stew & SK)
+                        </span>
+                      )}
+                      {row.divisionCode === 'STEWARD' && (
+                        <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 px-1.5 py-0.5 rounded capitalize">
+                          Steward
+                        </span>
+                      )}
+                      {row.divisionCode === 'STOREKEEPER' && (
+                        <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 px-1.5 py-0.5 rounded capitalize">
+                          Store Keeper
+                        </span>
+                      )}
+                      {row.divisionCode === 'SERVICE' && (
+                        <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 px-1.5 py-0.5 rounded capitalize">
+                          Service
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center font-black text-sm bg-yellow-50 dark:bg-yellow-950/20 text-slate-900 dark:text-yellow-300">
                     {row.currentBudget}
@@ -1361,8 +1403,15 @@ export const ManpowerTableModule: React.FC<Props> = ({
                   <td className={`px-4 py-3 text-center font-black text-sm ${row.variance < 0 ? 'text-rose-600 dark:text-rose-400' : row.variance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}`}>
                     {row.variance > 0 ? `+${row.variance}` : row.variance}
                   </td>
-                  <td className="px-4 py-3 text-center font-bold text-slate-500 dark:text-slate-400">
-                    {row.previousBudget}
+                  <td className="px-3 py-2 text-center">
+                    <input
+                      type="number"
+                      min="0"
+                      value={row.previousBudget ?? ''}
+                      onChange={(e) => handlePreviousBudgetChange(row.divisionCode, parseInt(e.target.value) || 0)}
+                      className="w-16 px-2 py-1 text-center font-bold text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-900 outline-none transition-all"
+                      title="Edit Previous Budget untuk department ini"
+                    />
                   </td>
                 </tr>
               ))}
@@ -1402,12 +1451,21 @@ export const ManpowerTableModule: React.FC<Props> = ({
                 <td className={`px-4 py-3 text-center text-base font-black ${summary.totalInhouseVariance < 0 ? 'text-rose-400' : 'text-slate-200'}`}>
                   {summary.totalInhouseVariance > 0 ? `+${summary.totalInhouseVariance}` : summary.totalInhouseVariance}
                 </td>
-                <td className="px-4 py-3 text-center text-slate-300">
+                <td className="px-4 py-3 text-center text-slate-300 font-black">
                   {summary.previousBudgetTotal}
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 font-medium">
+            <i className="fas fa-info-circle text-indigo-500"></i>
+            Baris <strong>KITCHEN</strong> dihitung murni (dikurangi Steward & Store Keeper). Baris <strong>TOTAL</strong> menggabungkan seluruh departemen (Kitchen + Steward + Store Keeper + Service + Bar + PA).
+          </span>
+          <span className="text-[11px] font-semibold text-slate-500">
+            Nilai Previous Budget dapat diedit per departemen.
+          </span>
         </div>
       </div>
 

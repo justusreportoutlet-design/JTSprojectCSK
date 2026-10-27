@@ -359,6 +359,7 @@ export interface OutletManpowerData {
   outlet: string;
   period?: string; // e.g. YYYY-MM
   previousBudgetTotal?: number;
+  previousBudgets?: Record<string, number>;
   sections: ManpowerSection[];
   externalEntries?: ExternalManpowerEntry[];
   updatedAt?: string;
