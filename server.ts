@@ -139,9 +139,12 @@ async function startServer() {
   });
 
   // --- Real-time High-Availability Cross-Device Sync API ---
-  // Guarantees all devices (PC, mobile, tablet) and Regional Page stay in sync with zero latency
+  // Guarantees all devices (PC, mobile, tablet, Firefox, Chrome) and Regional Page stay in sync with zero latency
   app.get("/api/sync/all-outlets", (_req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       const outlets = readOutletsData();
       res.json({ success: true, outlets });
     } catch (error) {
@@ -152,6 +155,9 @@ async function startServer() {
 
   app.get("/api/sync/outlet/:outletId", (req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       const { outletId } = req.params;
       const outlets = readOutletsData();
       res.json({ success: true, outlet: outlets[outletId] || null });
@@ -221,6 +227,21 @@ async function startServer() {
           };
         }
       });
+
+      // Consolidate & replicate manpowerData across all months
+      if (existing.manpowerData && typeof existing.manpowerData === 'object') {
+        Object.entries(existingMonthly).forEach(([mKey, mObj]: [string, any]) => {
+          if (mObj && typeof mObj === 'object') {
+            existingMonthly[mKey] = {
+              ...mObj,
+              manpowerData: {
+                ...(existing.manpowerData || {}),
+                ...(mObj.manpowerData || {})
+              }
+            };
+          }
+        });
+      }
 
       existing.monthlyData = existingMonthly;
       existing.isDeleted = false;

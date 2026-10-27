@@ -21,22 +21,34 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// VERSI IRIT 1000 BROWSER - ANTI LELET
 let firestoreDb: any;
+
 try {
-  firestoreDb = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-      cacheSizeBytes: CACHE_SIZE_UNLIMITED
-    })
-  });
+  firestoreDb = getFirestore(app);
 } catch {
+  // Not initialized yet
+}
+
+if (!firestoreDb) {
   try {
-    firestoreDb = getFirestore(app);
-  } catch {
     firestoreDb = initializeFirestore(app, {
-      localCache: memoryLocalCache()
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED
+      })
     });
+  } catch {
+    try {
+      firestoreDb = getFirestore(app);
+    } catch {
+      try {
+        firestoreDb = initializeFirestore(app, {
+          localCache: memoryLocalCache()
+        });
+      } catch {
+        firestoreDb = getFirestore(app);
+      }
+    }
   }
 }
 

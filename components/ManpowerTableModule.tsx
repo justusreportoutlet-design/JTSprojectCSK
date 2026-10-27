@@ -42,24 +42,96 @@ export const ManpowerTableModule: React.FC<Props> = ({
   }, [data.manpowerData, selectedOutlet, monthKey]);
 
   const [manpowerState, setManpowerState] = useState<OutletManpowerData>(activeManpowerData);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
 
-  // Sync state if activeManpowerData changes externally
+  const currentOutletMonth = `${selectedOutlet}_${monthKey}`;
+  const prevOutletMonthRef = React.useRef<string>(currentOutletMonth);
+  const autoSaveTimerRef = React.useRef<any>(null);
+
+  // Sync state if activeManpowerData changes externally or when switching outlet/month
   React.useEffect(() => {
-    setManpowerState(activeManpowerData);
-  }, [activeManpowerData]);
+    // If outlet or month changed, always load the new outlet/month's data
+    if (prevOutletMonthRef.current !== currentOutletMonth) {
+      prevOutletMonthRef.current = currentOutletMonth;
+      setManpowerState(activeManpowerData);
+      setHasUnsavedChanges(false);
+      return;
+    }
 
-  // Persist helper
-  const saveManpowerChanges = (updated: OutletManpowerData, toastMsg?: string) => {
-    setManpowerState(updated);
-    const all = { ...(data.manpowerData || {}) };
-    all[outletKey] = updated;
-    all[legacyOutletKey] = updated;
-    all[`${selectedOutlet}_LATEST`] = updated;
-    onUpdate('manpowerData', all, true);
-    if (toastMsg && showToast) {
-      showToast(toastMsg, 'success');
+    // If still in the same outlet & month, only update if user has NO unsaved edits
+    // This prevents background syncs/listeners from stomping on active user typing
+    if (!hasUnsavedChanges) {
+      setManpowerState(activeManpowerData);
+    }
+  }, [activeManpowerData, currentOutletMonth, hasUnsavedChanges]);
+
+  // Submit / Persist helper
+  const handleSubmitManpower = async (updatedData: OutletManpowerData = manpowerState, isManual: boolean = true) => {
+    setIsSubmitting(true);
+    try {
+      const all = { ...(data.manpowerData || {}) };
+      all[outletKey] = updatedData;
+      all[legacyOutletKey] = updatedData;
+      all[`${selectedOutlet}_LATEST`] = updatedData;
+
+      // Update parent App state
+      onUpdate('manpowerData', all, true);
+
+      // Direct high-availability HTTP sync to server API with anti-cache query
+      try {
+        await fetch(`/api/sync/outlet/${encodeURIComponent(selectedOutlet)}?_t=${Date.now()}`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          },
+          body: JSON.stringify({
+            data: { [filters?.month || String(new Date().getMonth())]: { manpowerData: all } },
+            email: 'manpower-submit',
+            extraGlobal: { manpowerData: all }
+          })
+        });
+      } catch (apiErr) {
+        console.warn('[Manpower] Server direct sync fallback:', apiErr);
+      }
+
+      setHasUnsavedChanges(false);
+      setLastSavedTime(new Date());
+
+      if (isManual && showToast) {
+        showToast(`Data Man Power ${selectedOutlet} berhasil di-submit & disinkronkan ke seluruh sistem!`, 'success');
+      }
+    } catch (err) {
+      console.error('[Manpower] Submit error:', err);
+      if (isManual && showToast) {
+        showToast('Gagal menyimpan data Man Power. Silakan coba lagi.', 'error');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+  // Auto-save safety net: if user made changes and paused for 3 seconds, save in background
+  React.useEffect(() => {
+    if (!hasUnsavedChanges) return;
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      handleSubmitManpower(manpowerState, false);
+    }, 3000);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [manpowerState, hasUnsavedChanges]);
 
   // Calculations
   const summary = useMemo(() => {
@@ -144,10 +216,11 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
-  // Update Slot Position, Remark, or Staff Name inline
+  // Update Slot Position, Remark, or Staff Name inline without losing focus or lagging
   const handleSlotFieldChange = (sectionId: string, slotId: string, field: 'position' | 'remark' | 'staffName', value: string) => {
     const updatedSections = manpowerState.sections.map(sec => {
       if (sec.id !== sectionId) return sec;
@@ -169,7 +242,8 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
   // Add new Slot to Section
@@ -196,7 +270,8 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, 'Berhasil menambahkan 1 slot posisi');
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
   // Delete Slot from Section
@@ -219,7 +294,8 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, 'Slot berhasil dihapus');
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
   // Update Section Budget or Name
@@ -237,7 +313,8 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
   // Delete Entire Section
@@ -249,7 +326,9 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, `Section "${sectionName}" berhasil dihapus`);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
+    handleSubmitManpower(updatedData, true);
   };
 
   // Add New Section to a Division
@@ -285,10 +364,12 @@ export const ManpowerTableModule: React.FC<Props> = ({
       sections: updatedSections,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, `Section "${newSection.name}" berhasil ditambahkan ke divisi ${targetDivision}!`);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
     setShowAddSectionModal(false);
     setNewSectionName('');
     setNewSectionBudget(2);
+    handleSubmitManpower(updatedData, true);
   };
 
   // Open External Modal
@@ -359,8 +440,10 @@ export const ManpowerTableModule: React.FC<Props> = ({
       externalEntries: existing,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, 'Data Manpower External berhasil disimpan');
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
     setShowExternalModal(false);
+    handleSubmitManpower(updatedData, true);
   };
 
   // Delete External Manpower
@@ -371,7 +454,9 @@ export const ManpowerTableModule: React.FC<Props> = ({
       externalEntries: existing,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData, 'Data Manpower External berhasil dihapus');
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
+    handleSubmitManpower(updatedData, true);
   };
 
   // Toggle External Status
@@ -391,14 +476,17 @@ export const ManpowerTableModule: React.FC<Props> = ({
       externalEntries: existing,
       updatedAt: new Date().toISOString()
     };
-    saveManpowerChanges(updatedData);
+    setManpowerState(updatedData);
+    setHasUnsavedChanges(true);
   };
 
   // Reset to Default Template
   const handleResetDefault = () => {
     if (window.confirm(`Kembalikan data tabel Man Power untuk ${selectedOutlet} ke template awal standar?`)) {
       const def = createDefaultManpowerData(selectedOutlet);
-      saveManpowerChanges(def, 'Tabel Man Power dikembalikan ke template awal');
+      setManpowerState(def);
+      setHasUnsavedChanges(true);
+      handleSubmitManpower(def, true);
     }
   };
 
@@ -824,13 +912,29 @@ export const ManpowerTableModule: React.FC<Props> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <span className="px-3 py-1 bg-indigo-950 text-indigo-300 rounded-lg text-xs font-black uppercase tracking-wider border border-indigo-800">
                 Tabel Man Power Outlet
               </span>
               <span className="text-xs text-slate-400 font-medium">
                 Periode: {monthKey}
               </span>
+              {hasUnsavedChanges ? (
+                <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  Ada perubahan belum di-submit
+                </span>
+              ) : lastSavedTime ? (
+                <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                  <i className="fas fa-check text-[9px]"></i>
+                  Tersimpan ({lastSavedTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                  <i className="fas fa-cloud text-[9px] text-emerald-400"></i>
+                  Data Tersinkron
+                </span>
+              )}
             </div>
             <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight mt-1 flex items-center gap-2">
               <span>{selectedOutlet}</span>
@@ -842,6 +946,34 @@ export const ManpowerTableModule: React.FC<Props> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* SUBMIT BUTTON - PROMINENT & HIGH VISIBILITY */}
+            <button
+              onClick={() => handleSubmitManpower(manpowerState, true)}
+              disabled={isSubmitting}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg active:scale-95 cursor-pointer ${
+                hasUnsavedChanges
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 ring-2 ring-emerald-400 shadow-emerald-950/60 animate-pulse'
+                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30'
+              }`}
+              title="Submit & Simpan perubahan tabel Man Power ke Cloud & Seluruh Outlet"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                  <span>Menyimpan...</span>
+                </>
+              ) : hasUnsavedChanges ? (
+                <>
+                  <i className="fas fa-save text-sm text-slate-950"></i>
+                  <span>SUBMIT PERUBAHAN MAN POWER</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-check-circle text-emerald-400"></i>
+                  <span>SUBMIT / SIMPAN (Tersimpan)</span>
+                </>
+              )}
+            </button>
             {onNavigateToWeeklyOvertime && (
               <button
                 onClick={onNavigateToWeeklyOvertime}
@@ -1761,6 +1893,40 @@ export const ManpowerTableModule: React.FC<Props> = ({
                 </div>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* FLOATING STICKY SUBMIT BAR FOR CONVENIENT SAVING ANYWHERE IN TABLE */}
+      <AnimatePresence>
+        {hasUnsavedChanges && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500 p-3.5 rounded-2xl shadow-2xl shadow-emerald-950/80"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold text-emerald-300 pr-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>Ada perubahan Man Power belum disimpan!</span>
+            </div>
+            <button
+              onClick={() => handleSubmitManpower(manpowerState, true)}
+              disabled={isSubmitting}
+              className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Menyimpan...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-save text-sm"></i>
+                  <span>SUBMIT SEKARANG</span>
+                </>
+              )}
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

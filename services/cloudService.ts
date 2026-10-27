@@ -641,9 +641,13 @@ export async function saveOutletData(
   // 1. Immediately save & synchronize to High-Availability Cloud Server API (instant cross-device sync)
   let serverSyncSuccess = false;
   try {
-    const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}`, {
+    const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}?_t=${Date.now()}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
       body: JSON.stringify({ data, email, extraGlobal })
     });
     if (res.ok) {
@@ -790,7 +794,13 @@ export async function fetchAllOutletsData(): Promise<Record<string, any> | null>
 
   // 1. Fetch from server-side sync API
   try {
-    const sRes = await fetch('/api/sync/all-outlets');
+    const sRes = await fetch(`/api/sync/all-outlets?_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
     if (sRes.ok) {
       const sJson = await sRes.json();
       if (sJson.outlets && typeof sJson.outlets === 'object') {
@@ -861,7 +871,13 @@ export function startAllOutletsListener(onUpdate: (data: Record<string, any>) =>
   const pollServerSync = async () => {
     if (!isSubscribed) return;
     try {
-      const res = await fetch('/api/sync/all-outlets');
+      const res = await fetch(`/api/sync/all-outlets?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.outlets && typeof json.outlets === 'object') {
@@ -943,7 +959,13 @@ export function startRealtimeListener(
   const fetchData = async () => {
     if (!isSubscribed) return;
     try {
-      const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}`);
+      const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.outlet && isSubscribed) {
