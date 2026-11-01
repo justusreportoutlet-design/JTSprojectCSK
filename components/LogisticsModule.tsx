@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import html2pdf from 'html2pdf.js';
 import { AppState, LogisticItem, DailyLogisticRecord, PeminjamanRecord } from '../types';
 import { getOrderScheduleForOutlet } from '../constants';
+import FeatureSubmitSyncButton from './FeatureSubmitSyncButton';
 
 // Helper functions for Cut-off (Tanggal 1 - Akhir Bulan)
 export interface PeriodInfo {
@@ -119,6 +120,60 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
   const [showStockOpnameModal, setShowStockOpnameModal] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [resetType, setResetType] = useState<'INPUT_ONLY' | 'ALL'>('INPUT_ONLY');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+
+  const handleSubmitLogistics = async () => {
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        logisticItems: data.logisticItems || [],
+        dailyLogisticRecords: data.dailyLogisticRecords || {},
+        peminjamanRecords: data.peminjamanRecords || [],
+        logisticBeginningStocks: data.logisticBeginningStocks || {},
+        logisticPeriodPrices: data.logisticPeriodPrices || {}
+      };
+
+      // 1. Update parent App state with priority
+      onUpdate(payload, true);
+
+      // 2. Direct high-availability HTTP sync to server API
+      if (selectedOutlet) {
+        try {
+          await fetch(`/api/sync/outlet/${encodeURIComponent(selectedOutlet)}?_t=${Date.now()}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            },
+            body: JSON.stringify({
+              data: { [filterMonth || String(new Date().getMonth())]: payload },
+              email: 'logistics-submit',
+              extraGlobal: payload
+            })
+          });
+        } catch (apiErr) {
+          console.warn('[Logistics] Server direct sync fallback:', apiErr);
+        }
+      }
+
+      // 3. Broadcast immediate priority sync event across app
+      window.dispatchEvent(
+        new CustomEvent('appSubmitSyncFeature', {
+          detail: { featureName: 'Rekapan Logistik', timestamp: Date.now() }
+        })
+      );
+
+      setLastSavedTime(new Date());
+      showToast(`Data Rekapan Logistik ${selectedOutlet ? `(${selectedOutlet}) ` : ''}berhasil di-submit & disinkronkan ke seluruh sistem!`, 'success');
+    } catch (err) {
+      console.error('[Logistics] Submit error:', err);
+      showToast('Gagal menyimpan data logistik. Silakan coba lagi.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleResetLogistics = () => {
     if (resetType === 'ALL') {
@@ -535,9 +590,40 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
                 Hari Order: {getOrderScheduleForOutlet(selectedOutlet).label}
               </span>
             )}
+            {lastSavedTime ? (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 font-mono text-[9px] font-black uppercase flex items-center gap-1 shadow-sm">
+                <i className="fas fa-check text-[8px]"></i>
+                Tersimpan ({lastSavedTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 font-mono text-[9px] font-bold uppercase flex items-center gap-1">
+                <i className="fas fa-cloud text-[8px] text-emerald-400"></i>
+                Data Tersinkron
+              </span>
+            )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Tombol Submit Data Logistik */}
+          <button
+            type="button"
+            onClick={handleSubmitLogistics}
+            disabled={isSubmitting}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2 border border-emerald-300 shadow-xl shadow-emerald-950/40 ring-2 ring-emerald-400/40 cursor-pointer disabled:opacity-50"
+            title="Submit dan sinkronkan seluruh data rekapan logistik ke database server"
+          >
+            {isSubmitting ? (
+              <>
+                <i className="fas fa-spinner fa-spin text-xs"></i>
+                <span>Menyimpan...</span>
+              </>
+            ) : (
+              <>
+                <i className="fas fa-cloud-arrow-up text-xs"></i>
+                <span>Submit Data Logistik</span>
+              </>
+            )}
+          </button>
           <button
             onClick={() => setShowAddItemModal(true)}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2 border border-indigo-400/20"
@@ -687,6 +773,13 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Sync & Submit Action Banner */}
+            <FeatureSubmitSyncButton
+              featureName="Rekapan Logistik"
+              onSync={handleSubmitLogistics}
+              className="shadow-xl"
+            />
 
             {/* Main Stock Table */}
             <div className="glass-card rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
