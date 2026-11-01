@@ -19,6 +19,215 @@ interface Props {
   onNavigateToWeeklyOvertime?: () => void;
 }
 
+interface SlotRowItemProps {
+  sectionId: string;
+  slot: ManpowerSlot;
+  onStatusChange: (sectionId: string, slotId: string, newStatus: ManpowerSlotStatus) => void;
+  onFieldChange: (sectionId: string, slotId: string, field: 'position' | 'remark' | 'staffName', value: string) => void;
+  onDeleteSlot: (sectionId: string, slotId: string) => void;
+}
+
+const SlotRowItem: React.FC<SlotRowItemProps> = React.memo(({
+  sectionId,
+  slot,
+  onStatusChange,
+  onFieldChange,
+  onDeleteSlot
+}) => {
+  const [localStaffName, setLocalStaffName] = useState(slot.staffName || '');
+  const [localPosition, setLocalPosition] = useState(slot.position || '');
+  const [localRemark, setLocalRemark] = useState(slot.remark || '');
+
+  React.useEffect(() => {
+    setLocalStaffName(slot.staffName || '');
+  }, [slot.staffName]);
+
+  React.useEffect(() => {
+    setLocalPosition(slot.position || '');
+  }, [slot.position]);
+
+  React.useEffect(() => {
+    setLocalRemark(slot.remark || '');
+  }, [slot.remark]);
+
+  const isVacantOpen = slot.status === 'VACANT_OPEN';
+  const isVacantHold = slot.status === 'VACANT_HOLD';
+  const isFilled = slot.status === 'FILLED';
+
+  return (
+    <tr
+      className={`border-b border-slate-800/90 transition-colors ${
+        isVacantOpen
+          ? 'bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-100'
+          : isVacantHold
+          ? 'bg-amber-950/40 hover:bg-amber-950/60 text-amber-100'
+          : 'bg-slate-900/90 hover:bg-slate-850 text-slate-200'
+      }`}
+    >
+      {/* Column 1: DEPARTMENT / SLOT NUMBER + VACANT BUTTONS */}
+      <td className="px-4 py-2 text-xs border-r border-slate-800/80">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-5 text-center font-mono font-bold text-slate-400 text-xs">
+              {slot.slotNumber}
+            </span>
+
+            {/* Status Badge Preview */}
+            {isVacantOpen && (
+              <span className="px-2 py-0.5 bg-[#22c55e] text-slate-950 font-black rounded text-[11px] shadow-sm tracking-wide uppercase">
+                Vacant Open
+              </span>
+            )}
+            {isVacantHold && (
+              <span className="px-2 py-0.5 bg-amber-500 text-slate-950 font-black rounded text-[11px] shadow-sm tracking-wide uppercase">
+                Vacant Hold
+              </span>
+            )}
+            {isFilled && (
+              <span className="px-2 py-0.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded text-[10px]">
+                Terisi
+              </span>
+            )}
+          </div>
+
+          {/* ACTION BUTTONS: VACANT OPEN, VACANT HOLD, TERISI */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onStatusChange(sectionId, slot.id, 'VACANT_OPEN')}
+              title="Tandai sebagai Vacant Open (Lowongan Dibuka)"
+              className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all shadow-xs cursor-pointer ${
+                isVacantOpen
+                  ? 'bg-[#15803d] text-white ring-2 ring-[#22c55e]'
+                  : 'bg-emerald-500/20 text-emerald-300 hover:bg-[#22c55e] hover:text-slate-950 border border-emerald-500/40'
+              }`}
+            >
+              Vacant Open
+            </button>
+
+            <button
+              onClick={() => onStatusChange(sectionId, slot.id, 'VACANT_HOLD')}
+              title="Tandai sebagai Vacant Hold (Ditahan)"
+              className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all shadow-xs cursor-pointer ${
+                isVacantHold
+                  ? 'bg-amber-600 text-white ring-2 ring-amber-400'
+                  : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/40'
+              }`}
+            >
+              Vacant Hold
+            </button>
+
+            <button
+              onClick={() => onStatusChange(sectionId, slot.id, 'FILLED')}
+              title="Tandai sebagai Terisi / Aktif"
+              className={`px-2 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                isFilled
+                  ? 'bg-indigo-600 text-white ring-1 ring-indigo-400'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700'
+              }`}
+            >
+              Terisi
+            </button>
+
+            <button
+              onClick={() => onDeleteSlot(sectionId, slot.id)}
+              title="Hapus baris ini"
+              className="text-slate-500 hover:text-rose-400 p-1 transition-colors text-[10px] cursor-pointer"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+        </div>
+      </td>
+
+      {/* Column 2: NAMA */}
+      <td className="px-3 py-2 text-xs border-r border-slate-800/80">
+        <input
+          type="text"
+          value={localStaffName}
+          onChange={(e) => setLocalStaffName(e.target.value)}
+          onBlur={() => {
+            if (localStaffName !== (slot.staffName || '')) {
+              onFieldChange(sectionId, slot.id, 'staffName', localStaffName);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder={isVacantOpen ? 'Lowongan Dibuka...' : isVacantHold ? 'Ditahan...' : 'Nama Karyawan...'}
+          className={`w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded font-medium text-xs text-white placeholder:text-slate-500 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none transition-all ${
+            isVacantOpen ? 'border-emerald-700/60 text-emerald-200 placeholder:text-emerald-500/70' : isVacantHold ? 'border-amber-700/60 text-amber-200 placeholder:text-amber-500/70' : ''
+          }`}
+        />
+      </td>
+
+      {/* Column 3: POSITION */}
+      <td className="px-3 py-2 text-xs border-r border-slate-800/80">
+        <input
+          type="text"
+          value={localPosition}
+          onChange={(e) => setLocalPosition(e.target.value)}
+          onBlur={() => {
+            if (localPosition !== (slot.position || '')) {
+              onFieldChange(sectionId, slot.id, 'position', localPosition);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="Nama Posisi / Role..."
+          className={`w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded font-medium text-xs text-white placeholder:text-slate-500 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none transition-all ${
+            isVacantOpen ? 'border-emerald-700/60 text-emerald-200' : ''
+          }`}
+        />
+      </td>
+
+      {/* Column 4: BUDGET */}
+      <td className="px-3 py-2 text-center text-xs text-slate-500 border-r border-slate-800/80">
+        —
+      </td>
+
+      {/* Column 5: ACTUAL */}
+      <td className="px-3 py-2 text-center text-xs border-r border-slate-800/80">
+        {isFilled ? (
+          <span className="text-emerald-400 font-bold">1</span>
+        ) : (
+          <span className="text-slate-500">—</span>
+        )}
+      </td>
+
+      {/* Column 6: VARIANCE */}
+      <td className="px-3 py-2 text-center text-xs text-slate-500 border-r border-slate-800/80">
+        —
+      </td>
+
+      {/* Column 7: REMARK */}
+      <td className="px-3 py-2 text-xs">
+        <input
+          type="text"
+          value={localRemark}
+          onChange={(e) => setLocalRemark(e.target.value)}
+          onBlur={() => {
+            if (localRemark !== (slot.remark || '')) {
+              onFieldChange(sectionId, slot.id, 'remark', localRemark);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder={isVacantOpen ? 'Catatan lowongan / target join...' : 'Catatan posisi / join date...'}
+          className="w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded text-xs text-slate-200 placeholder:text-slate-500 focus:border-indigo-400 outline-none"
+        />
+      </td>
+    </tr>
+  );
+});
+
 export const ManpowerTableModule: React.FC<Props> = ({
   data,
   onUpdate,
@@ -114,24 +323,15 @@ export const ManpowerTableModule: React.FC<Props> = ({
     }
   };
 
-  // Auto-save safety net: if user made changes and paused for 3 seconds, save in background
+  // Unsaved changes notice - saved cleanly via manual SUBMIT button
+  // Clean up timer on unmount
   React.useEffect(() => {
-    if (!hasUnsavedChanges) return;
-
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-    }
-
-    autoSaveTimerRef.current = setTimeout(() => {
-      handleSubmitManpower(manpowerState, false);
-    }, 3000);
-
     return () => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [manpowerState, hasUnsavedChanges]);
+  }, []);
 
   // Calculations
   const summary = useMemo(() => {
@@ -773,155 +973,16 @@ export const ManpowerTableModule: React.FC<Props> = ({
         </tr>
 
         {/* Section Slot Rows */}
-        {sec.slots.map((slot) => {
-          const isVacantOpen = slot.status === 'VACANT_OPEN';
-          const isVacantHold = slot.status === 'VACANT_HOLD';
-          const isFilled = slot.status === 'FILLED';
-
-          return (
-            <tr
-              key={slot.id}
-              className={`border-b border-slate-800/90 transition-colors ${
-                isVacantOpen
-                  ? 'bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-100'
-                  : isVacantHold
-                  ? 'bg-amber-950/40 hover:bg-amber-950/60 text-amber-100'
-                  : 'bg-slate-900/90 hover:bg-slate-850 text-slate-200'
-              }`}
-            >
-              {/* Column 1: DEPARTMENT / SLOT NUMBER + VACANT BUTTONS */}
-              <td className="px-4 py-2 text-xs border-r border-slate-800/80">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 text-center font-mono font-bold text-slate-400 text-xs">
-                      {slot.slotNumber}
-                    </span>
-
-                    {/* Status Badge Preview */}
-                    {isVacantOpen && (
-                      <span className="px-2 py-0.5 bg-[#22c55e] text-slate-950 font-black rounded text-[11px] shadow-sm tracking-wide uppercase">
-                        Vacant Open
-                      </span>
-                    )}
-                    {isVacantHold && (
-                      <span className="px-2 py-0.5 bg-amber-500 text-slate-950 font-black rounded text-[11px] shadow-sm tracking-wide uppercase">
-                        Vacant Hold
-                      </span>
-                    )}
-                    {isFilled && (
-                      <span className="px-2 py-0.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded text-[10px]">
-                        Terisi
-                      </span>
-                    )}
-                  </div>
-
-                  {/* ACTION BUTTONS: VACANT OPEN, VACANT HOLD, TERISI */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleSlotStatusChange(sec.id, slot.id, 'VACANT_OPEN')}
-                      title="Tandai sebagai Vacant Open (Lowongan Dibuka)"
-                      className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all shadow-xs ${
-                        isVacantOpen
-                          ? 'bg-[#15803d] text-white ring-2 ring-[#22c55e]'
-                          : 'bg-emerald-500/20 text-emerald-300 hover:bg-[#22c55e] hover:text-slate-950 border border-emerald-500/40'
-                      }`}
-                    >
-                      Vacant Open
-                    </button>
-
-                    <button
-                      onClick={() => handleSlotStatusChange(sec.id, slot.id, 'VACANT_HOLD')}
-                      title="Tandai sebagai Vacant Hold (Ditahan)"
-                      className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all shadow-xs ${
-                        isVacantHold
-                          ? 'bg-amber-600 text-white ring-2 ring-amber-400'
-                          : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/40'
-                      }`}
-                    >
-                      Vacant Hold
-                    </button>
-
-                    <button
-                      onClick={() => handleSlotStatusChange(sec.id, slot.id, 'FILLED')}
-                      title="Tandai sebagai Terisi / Aktif"
-                      className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
-                        isFilled
-                          ? 'bg-indigo-600 text-white ring-1 ring-indigo-400'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700'
-                      }`}
-                    >
-                      Terisi
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteSlot(sec.id, slot.id)}
-                      title="Hapus baris ini"
-                      className="text-slate-500 hover:text-rose-400 p-1 transition-colors text-[10px]"
-                    >
-                      <i className="fas fa-times"></i>
-                    </button>
-                  </div>
-                </div>
-              </td>
-
-              {/* Column 2: NAMA (NEW REQUESTED COLUMN) */}
-              <td className="px-3 py-2 text-xs border-r border-slate-800/80">
-                <input
-                  type="text"
-                  value={slot.staffName || ''}
-                  onChange={(e) => handleSlotFieldChange(sec.id, slot.id, 'staffName', e.target.value)}
-                  placeholder={isVacantOpen ? 'Lowongan Dibuka...' : isVacantHold ? 'Ditahan...' : 'Nama Karyawan...'}
-                  className={`w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded font-medium text-xs text-white placeholder:text-slate-500 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none transition-all ${
-                    isVacantOpen ? 'border-emerald-700/60 text-emerald-200 placeholder:text-emerald-500/70' : isVacantHold ? 'border-amber-700/60 text-amber-200 placeholder:text-amber-500/70' : ''
-                  }`}
-                />
-              </td>
-
-              {/* Column 3: POSITION */}
-              <td className="px-3 py-2 text-xs border-r border-slate-800/80">
-                <input
-                  type="text"
-                  value={slot.position}
-                  onChange={(e) => handleSlotFieldChange(sec.id, slot.id, 'position', e.target.value)}
-                  placeholder="Nama Posisi / Role..."
-                  className={`w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded font-medium text-xs text-white placeholder:text-slate-500 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none transition-all ${
-                    isVacantOpen ? 'border-emerald-700/60 text-emerald-200' : ''
-                  }`}
-                />
-              </td>
-
-              {/* Column 4: BUDGET */}
-              <td className="px-3 py-2 text-center text-xs text-slate-500 border-r border-slate-800/80">
-                —
-              </td>
-
-              {/* Column 5: ACTUAL */}
-              <td className="px-3 py-2 text-center text-xs border-r border-slate-800/80">
-                {isFilled ? (
-                  <span className="text-emerald-400 font-bold">1</span>
-                ) : (
-                  <span className="text-slate-500">—</span>
-                )}
-              </td>
-
-              {/* Column 6: VARIANCE */}
-              <td className="px-3 py-2 text-center text-xs text-slate-500 border-r border-slate-800/80">
-                —
-              </td>
-
-              {/* Column 7: REMARK */}
-              <td className="px-3 py-2 text-xs">
-                <input
-                  type="text"
-                  value={slot.remark || ''}
-                  onChange={(e) => handleSlotFieldChange(sec.id, slot.id, 'remark', e.target.value)}
-                  placeholder={isVacantOpen ? 'Catatan lowongan / target join...' : 'Catatan posisi / join date...'}
-                  className="w-full bg-slate-950/80 border border-slate-700/80 px-2.5 py-1 rounded text-xs text-slate-200 placeholder:text-slate-500 focus:border-indigo-400 outline-none"
-                />
-              </td>
-            </tr>
-          );
-        })}
+        {sec.slots.map((slot) => (
+          <SlotRowItem
+            key={slot.id}
+            sectionId={sec.id}
+            slot={slot}
+            onStatusChange={handleSlotStatusChange}
+            onFieldChange={handleSlotFieldChange}
+            onDeleteSlot={handleDeleteSlot}
+          />
+        ))}
       </React.Fragment>
     );
   };

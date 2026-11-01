@@ -148,6 +148,24 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     }
   }, [data?.customSuppliers]);
 
+  const [deactivatedSuppliers, setDeactivatedSuppliers] = useState<string[]>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_DEACTIVATED_SUPPLIERS') : null;
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  });
+
+  React.useEffect(() => {
+    const handleDeactivatedChange = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setDeactivatedSuppliers(e.detail);
+      }
+    };
+    window.addEventListener('appDeactivatedSuppliersChanged', handleDeactivatedChange);
+    return () => window.removeEventListener('appDeactivatedSuppliersChanged', handleDeactivatedChange);
+  }, []);
+
   React.useEffect(() => {
     const handleSupChange = (e: any) => {
       if (e?.detail && Array.isArray(e.detail)) {
@@ -216,16 +234,19 @@ export const SupplierExpenseModule: React.FC<Props> = ({
   };
 
   const dynamicSuppliersList = useMemo<SupplierDef[]>(() => {
-    const customDefs: SupplierDef[] = customSuppliersList.map(cs => ({
-      key: cs.id,
-      label: cs.name,
-      ledgerKey: (cs.key || `daily_${cs.id}_ledger`) as keyof AppState,
-      expenseKey: cs.id,
-      icon: 'fa-truck-fast',
-      color: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-    }));
-    return [...SUPPLIERS_LIST, ...customDefs];
-  }, [customSuppliersList]);
+    const customDefs: SupplierDef[] = customSuppliersList
+      .filter(cs => cs.isActive !== false && !deactivatedSuppliers.includes(cs.id))
+      .map(cs => ({
+        key: cs.id,
+        label: cs.name,
+        ledgerKey: (cs.key || `daily_${cs.id}_ledger`) as keyof AppState,
+        expenseKey: cs.id,
+        icon: 'fa-truck-fast',
+        color: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+      }));
+    const filteredCore = SUPPLIERS_LIST.filter(sup => !deactivatedSuppliers.includes(sup.key));
+    return [...filteredCore, ...customDefs];
+  }, [customSuppliersList, deactivatedSuppliers]);
 
   // Robust helper to get items for any supplier (core or custom) for a date
   const getSupplierItemsForDate = (st: any, sup: SupplierDef, dateStr: string): LedgerItem[] => {

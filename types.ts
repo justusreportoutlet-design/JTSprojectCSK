@@ -1115,4 +1115,5 @@ export interface CustomSupplier {
   phone?: string;
   notes?: string;
   createdAt?: string;
+  isActive?: boolean;
 }

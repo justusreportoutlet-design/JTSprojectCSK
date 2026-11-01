@@ -128,6 +128,13 @@ export const OutletControlModal: React.FC<Props> = ({
 
   // Master Supplier State
   const [customSuppliers, setCustomSuppliers] = useState<CustomSupplier[]>(() => getStoredCustomSuppliers());
+  const [deactivatedSuppliers, setDeactivatedSuppliers] = useState<string[]>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_DEACTIVATED_SUPPLIERS') : null;
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  });
   const [supplierSearch, setSupplierSearch] = useState('');
   const [supplierCategoryFilter, setSupplierCategoryFilter] = useState('ALL');
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -208,6 +215,24 @@ export const OutletControlModal: React.FC<Props> = ({
         }
       } catch (err) {
         console.warn('[OutletControl] Notice for custom_suppliers:', err);
+      }
+
+      try {
+        // 5. Fetch deactivated_suppliers
+        const deactDocRef = doc(db, 'system_config', 'deactivated_suppliers');
+        const deactSnap = await getDoc(deactDocRef);
+        if (deactSnap.exists()) {
+          const data = deactSnap.data();
+          if (Array.isArray(data.deactivated)) {
+            setDeactivatedSuppliers(data.deactivated);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('APP_DEACTIVATED_SUPPLIERS', JSON.stringify(data.deactivated));
+              window.dispatchEvent(new CustomEvent('appDeactivatedSuppliersChanged', { detail: data.deactivated }));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[OutletControl] Notice for deactivated_suppliers:', err);
       }
     };
 
@@ -777,6 +802,41 @@ export const OutletControlModal: React.FC<Props> = ({
     await syncCustomSuppliersEverywhere(updatedList);
     showToast?.(`Supplier "${supplierToDelete.name}" berhasil dihapus dari sistem!`, 'success');
     setSupplierToDelete(null);
+  };
+
+  const handleToggleCustomSupplierActive = async (supId: string) => {
+    const updatedList = customSuppliers.map(s => {
+      if (s.id === supId) {
+        const currentActive = s.isActive !== false;
+        return { ...s, isActive: !currentActive };
+      }
+      return s;
+    });
+    await syncCustomSuppliersEverywhere(updatedList);
+    const sup = updatedList.find(s => s.id === supId);
+    showToast?.(`Supplier "${sup?.name}" berhasil di-${sup?.isActive !== false ? 'Aktifkan' : 'Nonaktifkan'}!`, 'success');
+  };
+
+  const handleToggleCoreSupplierActive = async (supId: string) => {
+    let updatedDeactivated: string[];
+    if (deactivatedSuppliers.includes(supId)) {
+      updatedDeactivated = deactivatedSuppliers.filter(id => id !== supId);
+    } else {
+      updatedDeactivated = [...deactivatedSuppliers, supId];
+    }
+    setDeactivatedSuppliers(updatedDeactivated);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('APP_DEACTIVATED_SUPPLIERS', JSON.stringify(updatedDeactivated));
+        window.dispatchEvent(new CustomEvent('appDeactivatedSuppliersChanged', { detail: updatedDeactivated }));
+      }
+      const deactDocRef = doc(db, 'system_config', 'deactivated_suppliers');
+      await setDoc(deactDocRef, { deactivated: updatedDeactivated, updatedAt: new Date().toISOString() }, { merge: true });
+    } catch (err) {
+      console.warn('[OutletControl] Sync deactivated suppliers error:', err);
+    }
+    const isNowActive = !updatedDeactivated.includes(supId);
+    showToast?.(`Supplier sistem "${supId.toUpperCase()}" berhasil di-${isNowActive ? 'Aktifkan' : 'Nonaktifkan'}!`, 'success');
   };
 
   // Filtered suppliers
@@ -1728,15 +1788,23 @@ export const OutletControlModal: React.FC<Props> = ({
                         </div>
 
                         <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                          <span className="text-[9px] text-slate-500 font-medium">
-                            <i className="fas fa-check-circle text-emerald-400 mr-1"></i>
-                            Tersinkron ke Receiving Sheet & Supplier
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCustomSupplierActive(sup.id)}
+                            className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                              sup.isActive !== false
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-sm'
+                                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                            }`}
+                            title={sup.isActive !== false ? 'Nonaktifkan Supplier ini' : 'Aktifkan Supplier ini'}
+                          >
+                            {sup.isActive !== false ? '● AKTIF' : '○ NONAKTIF'}
+                          </button>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleStartEditSupplier(sup)}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
                               title="Edit Supplier"
                             >
                               <i className="fas fa-edit text-[9px]"></i> Edit
@@ -1744,7 +1812,7 @@ export const OutletControlModal: React.FC<Props> = ({
                             <button
                               type="button"
                               onClick={() => setSupplierToDelete(sup)}
-                              className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
                               title="Hapus Supplier"
                             >
                               <i className="fas fa-trash-alt text-[9px]"></i> Hapus
@@ -1770,25 +1838,42 @@ export const OutletControlModal: React.FC<Props> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                  {filteredCoreSuppliers.map(sup => (
-                    <div
-                      key={sup.id}
-                      className="p-3 rounded-2xl bg-slate-950/40 border border-white/5 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 shrink-0">
-                          <i className={`fas ${sup.icon}`}></i>
+                  {filteredCoreSuppliers.map(sup => {
+                    const isCoreActive = !deactivatedSuppliers.includes(sup.id);
+                    return (
+                      <div
+                        key={sup.id}
+                        className="p-3 rounded-2xl bg-slate-950/40 border border-white/5 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 shrink-0">
+                            <i className={`fas ${sup.icon}`}></i>
+                          </div>
+                          <div className="min-w-0">
+                            <h6 className="font-bold text-white text-xs truncate">{sup.name}</h6>
+                            <p className="text-[10px] text-slate-400 truncate">{sup.category}</p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <h6 className="font-bold text-white text-xs truncate">{sup.name}</h6>
-                          <p className="text-[10px] text-slate-400 truncate">{sup.category}</p>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCoreSupplierActive(sup.id)}
+                            className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                              isCoreActive
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-sm'
+                                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                            }`}
+                            title={isCoreActive ? 'Nonaktifkan Supplier ini' : 'Aktifkan Supplier ini'}
+                          >
+                            {isCoreActive ? '● AKTIF' : '○ NONAKTIF'}
+                          </button>
+                          <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                            Sistem
+                          </span>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-blue-500/15 text-blue-400 border border-blue-500/30 shrink-0">
-                        Sistem
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>

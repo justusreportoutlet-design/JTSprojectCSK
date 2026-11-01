@@ -116,18 +116,39 @@ const ReceivingSheetModule: React.FC<Props> = ({
   const [newSupplierPhone, setNewSupplierPhone] = useState<string>('');
   const [newSupplierNotes, setNewSupplierNotes] = useState<string>('');
 
-  // Active dynamic suppliers (Default 10 + Custom Suppliers)
+  const [deactivatedSuppliers, setDeactivatedSuppliers] = useState<string[]>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('APP_DEACTIVATED_SUPPLIERS') : null;
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  });
+
+  useEffect(() => {
+    const handleDeactivatedChange = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setDeactivatedSuppliers(e.detail);
+      }
+    };
+    window.addEventListener('appDeactivatedSuppliersChanged', handleDeactivatedChange);
+    return () => window.removeEventListener('appDeactivatedSuppliersChanged', handleDeactivatedChange);
+  }, []);
+
+  // Active dynamic suppliers (Default 10 + Custom Suppliers, filtering out deactivated ones)
   const activeSupplierColumns = useMemo<SupplierColDef[]>(() => {
     const customList = (data?.customSuppliers && data.customSuppliers.length > 0) ? data.customSuppliers : localCustomSuppliers;
-    const customCols: SupplierColDef[] = customList.map(cs => ({
-      id: cs.id,
-      key: cs.key || `daily_${cs.id}_ledger`,
-      label: (cs.name || cs.id).toUpperCase(),
-      isCustom: true,
-      category: cs.category
-    }));
-    return [...DEFAULT_SUPPLIER_COLUMNS, ...customCols];
-  }, [data?.customSuppliers, localCustomSuppliers]);
+    const customCols: SupplierColDef[] = customList
+      .filter(cs => cs.isActive !== false && !deactivatedSuppliers.includes(cs.id))
+      .map(cs => ({
+        id: cs.id,
+        key: cs.key || `daily_${cs.id}_ledger`,
+        label: (cs.name || cs.id).toUpperCase(),
+        isCustom: true,
+        category: cs.category
+      }));
+    const filteredDefault = DEFAULT_SUPPLIER_COLUMNS.filter(col => !deactivatedSuppliers.includes(col.id));
+    return [...filteredDefault, ...customCols];
+  }, [data?.customSuppliers, localCustomSuppliers, deactivatedSuppliers]);
 
   // Handler to add new supplier
   const handleAddSupplier = () => {
@@ -333,79 +354,110 @@ const ReceivingSheetModule: React.FC<Props> = ({
       let totalCostForDay = 0;
 
       activeSupplierColumns.forEach(sup => {
-        let supCost = 0;
+        const collectedItems: LedgerItem[] = [];
+        const seenItemKeys = new Set<string>();
+
         for (const st of monthlyStates) {
           if (sup.id === 'cash') {
-            let cashSum = 0;
-
-            // 1. Daily Cash Ledger
             const cashList = st.dailyCashLedger?.[dateStr] as LedgerItem[];
-            if (Array.isArray(cashList) && cashList.length > 0) {
-              cashSum += cashList.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
+            if (Array.isArray(cashList)) {
+              cashList.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
             }
-
-            // 2. Daily Commodity Ledger (Auto masuk ke CASH di Receiving Sheet)
             const commList = st.dailyCommodityLedger?.[dateStr] as LedgerItem[];
-            if (Array.isArray(commList) && commList.length > 0) {
-              cashSum += commList.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
+            if (Array.isArray(commList)) {
+              commList.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
             }
-
-            // 3. Fallback to expenses summary object if ledgers empty
-            if (cashSum === 0 && st.expenses?.[dateStr]) {
-              const exp = st.expenses[dateStr];
-              cashSum = (Number(exp.cash) || 0) + (Number(exp.commodity) || 0);
-            }
-
-            supCost += cashSum;
           } else if (sup.id === 'mainStore') {
-            let grossStore = 0;
             const storeList = (st.dailyMainStoreLedger?.[dateStr] || (st as any).dailyMainStore?.[dateStr]) as LedgerItem[];
-            if (Array.isArray(storeList) && storeList.length > 0) {
-              grossStore += storeList.reduce((acc, item) => {
-                const q = Number(item.qty) || 1;
-                const p = Number(item.price) || 0;
-                return acc + (q * p);
-              }, 0);
-            } else if (st.expenses?.[dateStr]?.mainStore) {
-              grossStore += Number(st.expenses[dateStr].mainStore) || 0;
+            if (Array.isArray(storeList)) {
+              storeList.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
             }
-            grossMainStoreForDay += grossStore;
-
-            // Automatically deduct Chemical, Stationary, and Marketing from Main Store on the same date
-            let netStore = grossStore;
-            if (Array.isArray(storeList) && storeList.length > 0) {
-              netStore = Math.max(0, grossStore - totalDeductionsForDay);
-            } else if (grossStore > 0 && !st.expenses?.[dateStr]?.mainStore) {
-              netStore = Math.max(0, grossStore - totalDeductionsForDay);
-            }
-            supCost += netStore;
           } else if (sup.isCustom) {
-            // Check custom supplier ledgers:
+            // Check custom supplier ledgers: prioritize dailyCustomSupplierLedgers, fallback to key, deduplicate strictly
             const custItems = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
             if (Array.isArray(custItems) && custItems.length > 0) {
-              supCost += custItems.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
-            }
-            const keyItems = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-            if (Array.isArray(keyItems) && keyItems.length > 0) {
-              supCost += keyItems.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
-            }
-            if (st.expenses?.[dateStr] && (st.expenses[dateStr] as any)[sup.id]) {
-              supCost += Number((st.expenses[dateStr] as any)[sup.id]) || 0;
+              custItems.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
+            } else {
+              const keyItems = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
+              if (Array.isArray(keyItems) && keyItems.length > 0) {
+                keyItems.forEach(it => {
+                  const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                  if (!seenItemKeys.has(k)) {
+                    seenItemKeys.add(k);
+                    collectedItems.push(it);
+                  }
+                });
+              }
             }
           } else {
             const ledgerList = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-            if (Array.isArray(ledgerList) && ledgerList.length > 0) {
-              const sum = ledgerList.reduce((acc, item) => {
-                const q = Number(item.qty) || 1;
-                const p = Number(item.price) || 0;
-                return acc + (q * p);
-              }, 0);
-              supCost += sum;
-            } else if (st.expenses?.[dateStr] && (st.expenses[dateStr] as any)[sup.id]) {
-              supCost += Number((st.expenses[dateStr] as any)[sup.id]) || 0;
+            if (Array.isArray(ledgerList)) {
+              ledgerList.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
             }
           }
         }
+
+        let supCost = 0;
+        if (collectedItems.length > 0) {
+          supCost = collectedItems.reduce((acc, item) => acc + ((Number(item.qty) || 1) * (Number(item.price) || 0)), 0);
+          if (sup.id === 'mainStore') {
+            grossMainStoreForDay = supCost;
+            supCost = Math.max(0, supCost - totalDeductionsForDay);
+          }
+        } else {
+          // Fallback to st.expenses only if no itemized ledger entries exist
+          for (const st of monthlyStates) {
+            if (st.expenses?.[dateStr]) {
+              const exp = st.expenses[dateStr];
+              let val = 0;
+              if (sup.id === 'cash') val = (Number(exp.cash) || 0) + (Number(exp.commodity) || 0);
+              else if (sup.id === 'mainStore') {
+                val = Number(exp.mainStore) || 0;
+                grossMainStoreForDay = val;
+                val = Math.max(0, val - totalDeductionsForDay);
+              } else if (sup.isCustom) {
+                val = Number((exp as any)[sup.id] || (exp as any)[sup.key]) || 0;
+              } else {
+                val = Number((exp as any)[sup.id]) || 0;
+              }
+              if (val > 0) {
+                supCost = val;
+                break;
+              }
+            }
+          }
+        }
+
         supplierCosts[sup.id] = supCost;
         totalCostForDay += supCost;
       });
@@ -670,20 +722,48 @@ const ReceivingSheetModule: React.FC<Props> = ({
 
     activeSupplierColumns.forEach(sup => {
       const list: LedgerItem[] = [];
+      const seenItemKeys = new Set<string>();
+
       for (const st of monthlyStates) {
         if (sup.id === 'cash') {
           const c1 = st.dailyCashLedger?.[dateStr] as LedgerItem[];
-          if (Array.isArray(c1)) list.push(...c1);
+          if (Array.isArray(c1)) {
+            c1.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          }
           const c2 = st.dailyCommodityLedger?.[dateStr] as LedgerItem[];
-          if (Array.isArray(c2)) list.push(...c2);
+          if (Array.isArray(c2)) {
+            c2.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          }
         } else if (sup.isCustom) {
           const c1 = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
-          if (Array.isArray(c1)) list.push(...c1);
-          const c2 = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-          if (Array.isArray(c2)) list.push(...c2);
+          if (Array.isArray(c1) && c1.length > 0) {
+            c1.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          } else {
+            const c2 = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
+            if (Array.isArray(c2)) {
+              c2.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+              });
+            }
+          }
         } else {
           const l = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-          if (Array.isArray(l)) list.push(...l);
+          if (Array.isArray(l)) {
+            l.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          }
         }
       }
       const dayCost = viewingDayRow.supplierCosts[sup.id] || 0;

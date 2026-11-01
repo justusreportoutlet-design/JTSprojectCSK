@@ -1091,27 +1091,45 @@ const App: React.FC = () => {
             });
         }
 
-        const { staffList, leaveRecords, dailyOvertime, dailyAttendance, dailyExternalAudit, dailyCPA, guestComplaints, affiliateHistory, ...rest } = cloudData;
+        const {
+          staffList,
+          leaveRecords,
+          dailyOvertime,
+          weeklyOvertime,
+          dailyAttendance,
+          dailyExternalAudit,
+          dailyCPA,
+          dailyGSI,
+          guestComplaints,
+          affiliateHistory,
+          manpowerData,
+          customSuppliers,
+          ...rest
+        } = cloudData;
         
         const hydratedGlobal: any = {
           staffList: staffList || INITIAL_STATE.staffList,
           leaveRecords: leaveRecords || INITIAL_STATE.leaveRecords,
           dailyOvertime: dailyOvertime || INITIAL_STATE.dailyOvertime,
+          weeklyOvertime: weeklyOvertime || (INITIAL_STATE as any).weeklyOvertime || {},
           dailyAttendance: dailyAttendance || INITIAL_STATE.dailyAttendance,
           dailyExternalAudit: dailyExternalAudit || {},
           dailyCPA: dailyCPA || {},
+          dailyGSI: dailyGSI || INITIAL_STATE.dailyGSI || {},
           guestComplaints: guestComplaints || [],
-          affiliateHistory: affiliateHistory || []
+          affiliateHistory: affiliateHistory || [],
+          manpowerData: manpowerData || {},
+          customSuppliers: customSuppliers || getStoredCustomSuppliers()
         };
 
         setGlobalDataState(hydratedGlobal);
         setOutletMonthlyData(rest || {});
 
-        // Build initial sync hashes
+        // Build initial sync hashes accurately to avoid spurious autosave right after login
         const globalFieldsList = ['staffList', 'leaveRecords', 'dailyOvertime', 'weeklyOvertime', 'dailyAttendance', 'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'guestComplaints', 'affiliateHistory', 'manpowerData'];
         const nextGlobalHashes: Record<string, string> = {};
         globalFieldsList.forEach(field => {
-          nextGlobalHashes[field] = JSON.stringify((hydratedGlobal as any)[field]);
+          nextGlobalHashes[field] = JSON.stringify((hydratedGlobal as any)[field] ?? {});
         });
         lastSyncedGlobal.current = nextGlobalHashes;
 
@@ -1984,12 +2002,14 @@ const App: React.FC = () => {
       if (initialData && Object.keys(initialData).length > 0) {
         setAllOutletsData(prev => ({ ...initialData, ...prev }));
         setIsAllOutletsLoading(false);
+        setSyncStatus('online');
       }
     }).catch(console.error);
 
     const unsubscribe = startAllOutletsListener((results) => {
       setAllOutletsData(results);
       setIsAllOutletsLoading(false);
+      setSyncStatus('online');
     });
     return unsubscribe;
   }, [isAuthReady, user.isLoggedIn, isPublicView]);
