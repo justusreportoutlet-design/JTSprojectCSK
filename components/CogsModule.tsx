@@ -7,6 +7,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'motion/react';
 import FeatureSubmitSyncButton from './FeatureSubmitSyncButton';
+import CogsWeeklyControlTable from './CogsWeeklyControlTable';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -649,8 +650,8 @@ export const CogsModule: React.FC<Props> = ({
   const [activeChartTab, setActiveChartTab] = useState<'TREND' | 'DIVISION' | 'SUPPLIER'>('TREND');
   const [activeAnalyticsTab, setActiveAnalyticsTab] = useState<'ALL' | 'STRATEGY' | 'MTD' | 'WEEKDAY' | 'WEEKEND'>('ALL');
 
-  // 9. Navigation Mode: 'OVERVIEW' vs 'ALOKASI_BUDGET' (Alokasi Budget Belanja MK, MS, Cash & Supplier terhubung ke COGS)
-  const [cogsMainTab, setCogsMainTab] = useState<'OVERVIEW' | 'ALOKASI_BUDGET'>('OVERVIEW');
+  // 9. Navigation Mode: 'OVERVIEW' vs 'WEEKLY_CONTROL' vs 'ALOKASI_BUDGET'
+  const [cogsMainTab, setCogsMainTab] = useState<'OVERVIEW' | 'WEEKLY_CONTROL' | 'ALOKASI_BUDGET'>('OVERVIEW');
   const [alokasiCategoryFilter, setAlokasiCategoryFilter] = useState<'ALL' | 'SUPPLIERS' | 'INTERNAL'>('ALL');
   const [alokasiSearch, setAlokasiSearch] = useState<string>('');
   const [procurementBudgetBasis, setProcurementBudgetBasis] = useState<'COGS_TARGET' | 'COGS_REMAINING' | 'ACTUAL_SPEND' | 'CUSTOM'>(() => {
@@ -2809,7 +2810,7 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
         </div>
       </div>
 
-      {/* NAVIGATION TABS: OVERVIEW COGS vs ALOKASI BUDGET BELANJA (MK, MS, CASH & SUPPLIER) */}
+      {/* NAVIGATION TABS: OVERVIEW COGS vs TABEL WEEKLY CONTROL vs ALOKASI BUDGET BELANJA */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 p-2.5 rounded-2xl border border-white/10 no-print shadow-xl">
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -2822,6 +2823,20 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
             }`}
           >
             <i className="fas fa-chart-line"></i> Overview COGS & Forecast Control
+          </button>
+          <button
+            type="button"
+            onClick={() => setCogsMainTab('WEEKLY_CONTROL')}
+            className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              cogsMainTab === 'WEEKLY_CONTROL'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                : 'bg-slate-950/60 text-slate-400 hover:text-white border border-white/5'
+            }`}
+          >
+            <i className="fas fa-calendar-week text-emerald-400"></i> Tabel Weekly Control (Revenue & Belanja 3 Divisi)
+            <span className="text-[10px] px-2 py-0.5 rounded-md bg-black/40 font-mono text-emerald-300 font-bold">
+              Week 1 - 4
+            </span>
           </button>
           <button
             type="button"
@@ -4404,6 +4419,31 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
           </div>
         </div>
 
+        {/* BANNER SHORTCUT: TABEL WEEKLY CONTROL (REVENUE & BUDGET BELANJA 3 DIVISI) */}
+        <div className="mb-4 p-4 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-slate-900 to-teal-950/40 border border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-lg font-black flex-none">
+              <i className="fas fa-calendar-week"></i>
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                Tabel Weekly Control (Revenue & Budget Belanja 3 Divisi)
+                <span className="text-[9px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono font-bold">Week 1 - 4 & MTD</span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Kontrol harian per minggu: Target vs Actual vs Variance Revenue, Budget Belanja 3 Divisi (Kitchen {kitchenPercent}%, Bar {barPercent}%, Service {servicePercent}% dari {targetBudgetPercent}% Forecast), dan Realisasi serta Variance Belanja.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCogsMainTab('WEEKLY_CONTROL')}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2 flex-none cursor-pointer active:scale-95"
+          >
+            <i className="fas fa-arrow-right"></i> Buka Tabel Weekly
+          </button>
+        </div>
+
         {/* BANNER SHORTCUT: ALOKASI BUDGET BELANJA PENGADAAN TERHUBUNG KE COGS */}
         <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-rose-950/40 via-slate-900 to-indigo-950/40 border border-rose-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -5598,6 +5638,13 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
                 {f.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setCogsMainTab('WEEKLY_CONTROL')}
+              className="px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-1.5 cursor-pointer ml-1"
+            >
+              <i className="fas fa-calendar-week"></i> Mode Weekly Control
+            </button>
           </div>
         </div>
 
@@ -5688,6 +5735,27 @@ ${calculationModel.divisionList.map(div => `- ${div.name} (${div.percent}%) Dari
         </div>
       </div>
     </div>
+  )}
+
+  {/* TAB 2: TABEL WEEKLY CONTROL (REVENUE & BUDGET BELANJA 3 DIVISI PER HARI DALAM 1 TABEL SETIAP WEEKLY) */}
+  {cogsMainTab === 'WEEKLY_CONTROL' && (
+    <CogsWeeklyControlTable
+      data={data}
+      selectedOutlet={selectedOutlet}
+      selectedMonth={selectedMonth}
+      selectedYear={selectedYear}
+      cutoffDay={cutoffDay}
+      targetBudgetPercent={targetBudgetPercent}
+      onUpdateTargetBudgetPercent={setTargetBudgetPercent}
+      divisionAllocations={divisionAllocations}
+      onUpdateDivisionAllocations={setDivisionAllocations}
+      calculationModel={calculationModel}
+      dailyTableData={dailyTableData}
+      onUpdate={onUpdate}
+      showToast={showToast}
+      allMonthlyData={allMonthlyData}
+      selectedOrderDays={selectedOrderDays}
+    />
   )}
 
   {cogsMainTab === 'ALOKASI_BUDGET' && (
