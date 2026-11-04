@@ -239,6 +239,7 @@ const App: React.FC = () => {
   const isPrioritySync = useRef(false);
   const maxDailyInputLimitRef = useRef<number>(2500);
   const flushPendingSyncRef = useRef<(() => Promise<boolean>) | null>(null);
+  const isLoggingOutRef = useRef(false);
 
   // Synchronize dynamic settings (like Batas Maksimal Input Harian) across users in real-time
   useEffect(() => {
@@ -385,14 +386,14 @@ const App: React.FC = () => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (!isMounted) return;
+      if (!isMounted || isLoggingOutRef.current) return;
 
       const manualEmail = safeStorage.getItem('MANUAL_USER_EMAIL') || safeStorage.getItem('BARN_USER_SESSION') || '';
       const resolvedEmail = (firebaseUser && firebaseUser.email) || (firebaseUser && firebaseUser.isAnonymous ? manualEmail : null) || (manualEmail || null);
 
-      if (resolvedEmail) {
+      if (resolvedEmail && !isLoggingOutRef.current) {
         const savedOutlet = safeStorage.getItem('BARN_SELECTED_OUTLET') as Outlet;
-        if (savedOutlet) {
+        if (savedOutlet && !isLoggingOutRef.current) {
           handleLogin(resolvedEmail, savedOutlet);
         } else {
           setUser({ email: resolvedEmail, isLoggedIn: false });
@@ -1006,9 +1007,21 @@ const App: React.FC = () => {
   const persistSyncedHashes = useCallback(() => {}, []);
 
   // Synchronously serialize and persist state to localStorage to prevent data loss on refresh/crash
-  // Removed local storage overrides as they overwrite real database inputs in multi-user settings
+  useEffect(() => {
+    if (!user.selectedOutlet || !isHydrated.current) return;
+    try {
+      safeStorage.setItem(`BARN_LOCAL_BACKUP_${user.selectedOutlet}`, JSON.stringify({
+        globalData,
+        outletMonthlyData,
+        timestamp: Date.now()
+      }));
+    } catch (e) {
+      // quota or storage unavailable
+    }
+  }, [globalData, outletMonthlyData, user.selectedOutlet]);
 
   const handleLogin = async (email: string, outlet: Outlet) => {
+    if (isLoggingOutRef.current) return;
     isHydrated.current = false;
     setIsRefreshing(true);
 
@@ -1027,6 +1040,16 @@ const App: React.FC = () => {
         } catch (authErr) {
           console.warn('[handleLogin] Auth anonymous notice:', authErr);
         }
+      }
+
+      // Check for local instant backup before remote fetch to prevent blank/lost data
+      const localBackupKey = `BARN_LOCAL_BACKUP_${outletKey}`;
+      let localBackupData: any = null;
+      const savedBackupStr = safeStorage.getItem(localBackupKey);
+      if (savedBackupStr) {
+        try {
+          localBackupData = JSON.parse(savedBackupStr);
+        } catch (e) {}
       }
 
       // 2. Fetch user data with 3.5s timeout safety to prevent infinite spinner
@@ -1069,6 +1092,32 @@ const App: React.FC = () => {
             console.error('[Offline Recovery] Error parsing pending sync data:', e);
           }
         }
+      }
+
+      // If cloudData is empty/null, restore immediately from local backup to prevent data loss on refresh
+      if (!cloudData && localBackupData) {
+        cloudData = {
+          ...(localBackupData.outletMonthlyData || {}),
+          ...(localBackupData.globalData || {})
+        };
+      } else if (cloudData && localBackupData) {
+        // Merge cloud data with recent uncommitted local inputs so nothing is lost
+        const backupMonthly = localBackupData.outletMonthlyData || {};
+        const backupGlobal = localBackupData.globalData || {};
+        cloudData = {
+          ...cloudData,
+          ...backupGlobal,
+          ...Object.fromEntries(
+            Object.entries(backupMonthly).map(([mKey, mVal]: [string, any]) => [
+              mKey,
+              { ...(cloudData[mKey] || {}), ...mVal }
+            ])
+          )
+        };
+      }
+
+      if (!cloudData) {
+        cloudData = { ...INITIAL_STATE };
       }
 
       if (cloudData) {
@@ -1143,6 +1192,7 @@ const App: React.FC = () => {
     } catch (loginError) {
       console.warn('[handleLogin] Notice during login data hydration:', loginError);
     } finally {
+      if (isLoggingOutRef.current) return;
       setUser({ email: cleanEmail, isLoggedIn: true, selectedOutlet: outletKey });
       setIsPublicView(false);
       safeStorage.setItem('BARN_USER_SESSION', cleanEmail);
@@ -1380,6 +1430,9 @@ const App: React.FC = () => {
   // Prevent data loss on refresh if sync is pending
   useEffect(() => {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (flushPendingSyncRef.current) {
+          flushPendingSyncRef.current().catch(() => {});
+        }
         if (syncStatus === 'syncing') {
           e.preventDefault();
           e.returnValue = '';
@@ -1438,9 +1491,9 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.info('[Visibility] Tab activated, refreshing latest outlet and regional data from server...');
-        if (user.isLoggedIn && user.email && user.selectedOutlet) {
-          handleLogin(user.email, user.selectedOutlet);
+        // Automatically flush any uncommitted local inputs to prevent data loss
+        if (flushPendingSyncRef.current) {
+          flushPendingSyncRef.current().catch(() => {});
         }
         fetchAllOutletsData().then(initialData => {
           if (initialData && Object.keys(initialData).length > 0) {
@@ -1947,16 +2000,28 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    isLoggingOutRef.current = true;
     try {
-      await signOut(auth);
-      setUser({ email: '', isLoggedIn: false });
+      // 1. Immediately wipe all user session tokens & chosen outlet from storage
       safeStorage.removeItem('BARN_USER_SESSION');
       safeStorage.removeItem('MANUAL_USER_EMAIL');
       safeStorage.removeItem('BARN_SELECTED_OUTLET');
-      setActiveModule(ModuleType.DASHBOARD);
+
+      // 2. Immediately reset state so LoginModule renders cleanly on the very first click
+      setIsPublicView(false);
+      setUser({ email: '', isLoggedIn: false, selectedOutlet: undefined });
       setIsAdmin(false);
+      setActiveModule(ModuleType.DASHBOARD);
+
+      // 3. Complete auth sign-out safely
+      await signOut(auth).catch(() => {});
     } catch (error) {
       console.error("Logout failed:", error);
+    } finally {
+      // Keep guard active briefly to ignore any trailing auth state events
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 800);
     }
   };
 

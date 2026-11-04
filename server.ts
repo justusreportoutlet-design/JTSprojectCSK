@@ -34,18 +34,30 @@ const DEFAULT_SYNC_OUTLETS = [
   { id: 'SH CIBUBUR', name: 'SH CIBUBUR', area: 'BEKASI', type: 'REGULAR OUTLET' }
 ];
 
+let outletsMemoryCache: Record<string, any> | null = null;
+let outletsVersion = Date.now();
+let outletsETag = `"${outletsVersion.toString(36)}"`;
+
 function readOutletsData(): Record<string, any> {
+  if (outletsMemoryCache) {
+    return outletsMemoryCache;
+  }
   try {
     if (fs.existsSync(OUTLETS_FILE)) {
-      return JSON.parse(fs.readFileSync(OUTLETS_FILE, "utf-8"));
+      outletsMemoryCache = JSON.parse(fs.readFileSync(OUTLETS_FILE, "utf-8"));
+      return outletsMemoryCache!;
     }
   } catch (err) {
     console.warn("Failed reading outlets.json:", err);
   }
-  return {};
+  outletsMemoryCache = {};
+  return outletsMemoryCache;
 }
 
 function writeOutletsData(data: Record<string, any>) {
+  outletsMemoryCache = data;
+  outletsVersion = Date.now();
+  outletsETag = `"${outletsVersion.toString(36)}"`;
   try {
     const tempFile = `${OUTLETS_FILE}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf-8");
@@ -53,6 +65,58 @@ function writeOutletsData(data: Record<string, any>) {
   } catch (err) {
     console.error("Failed writing outlets.json:", err);
   }
+}
+
+function mergeOutletMonth(existingMonth: any, incomingMonth: any): any {
+  if (!existingMonth || typeof existingMonth !== 'object') return incomingMonth;
+  if (!incomingMonth || typeof incomingMonth !== 'object') return existingMonth;
+
+  const result = { ...existingMonth };
+
+  Object.entries(incomingMonth).forEach(([key, incomingVal]) => {
+    if (incomingVal === undefined) return;
+
+    const existingVal = existingMonth[key];
+
+    if (existingVal === undefined || existingVal === null) {
+      result[key] = incomingVal;
+      return;
+    }
+
+    if (Array.isArray(incomingVal)) {
+      if (incomingVal.length > 0 || !Array.isArray(existingVal) || existingVal.length === 0) {
+        result[key] = incomingVal;
+      } else {
+        result[key] = existingVal;
+      }
+      return;
+    }
+
+    if (
+      typeof incomingVal === 'object' && !Array.isArray(incomingVal) &&
+      typeof existingVal === 'object' && !Array.isArray(existingVal)
+    ) {
+      const mergedSub: Record<string, any> = { ...existingVal };
+      Object.entries(incomingVal).forEach(([subKey, subVal]) => {
+        if (subVal !== undefined) {
+          if (
+            subVal && typeof subVal === 'object' && !Array.isArray(subVal) &&
+            mergedSub[subKey] && typeof mergedSub[subKey] === 'object' && !Array.isArray(mergedSub[subKey])
+          ) {
+            mergedSub[subKey] = { ...mergedSub[subKey], ...subVal };
+          } else {
+            mergedSub[subKey] = subVal;
+          }
+        }
+      });
+      result[key] = mergedSub;
+      return;
+    }
+
+    result[key] = incomingVal;
+  });
+
+  return result;
 }
 
 function readSystemConfig(): any {
@@ -140,11 +204,14 @@ async function startServer() {
 
   // --- Real-time High-Availability Cross-Device Sync API ---
   // Guarantees all devices (PC, mobile, tablet, Firefox, Chrome) and Regional Page stay in sync with zero latency
-  app.get("/api/sync/all-outlets", (_req, res) => {
+  app.get("/api/sync/all-outlets", (req, res) => {
     try {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
+      const clientETag = req.headers['if-none-match'];
+      if (clientETag && clientETag === outletsETag) {
+        return res.status(304).end();
+      }
+      res.setHeader('ETag', outletsETag);
+      res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=15');
       const outlets = readOutletsData();
       res.json({ success: true, outlets });
     } catch (error) {
@@ -155,12 +222,19 @@ async function startServer() {
 
   app.get("/api/sync/outlet/:outletId", (req, res) => {
     try {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
       const { outletId } = req.params;
       const outlets = readOutletsData();
-      res.json({ success: true, outlet: outlets[outletId] || null });
+      const currentOutlet = outlets[outletId] || null;
+      const outletTag = currentOutlet?.updatedAt ? `"${new Date(currentOutlet.updatedAt).getTime().toString(36)}"` : outletsETag;
+
+      const clientETag = req.headers['if-none-match'];
+      if (clientETag && clientETag === outletTag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader('ETag', outletTag);
+      res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=15');
+      res.json({ success: true, outlet: currentOutlet });
     } catch (error) {
       console.error(`Error reading outlet ${req.params.outletId}:`, error);
       res.status(500).json({ error: "Failed to read outlet" });
@@ -182,21 +256,39 @@ async function startServer() {
           if (!isNaN(mNum) && mNum >= 0 && mNum <= 11 && mVal && typeof mVal === 'object') {
             // Strip any nested monthlyData or invalid keys
             const { monthlyData: _ignored, ...cleanMonth } = mVal as any;
-            existingMonthly[mKey] = cleanMonth;
+            // DEEP MERGE with existing month so user edits and other divisions never clobber each other!
+            existingMonthly[mKey] = mergeOutletMonth(existingMonthly[mKey], cleanMonth);
           }
         });
       }
 
-      // Propagate top-level global fields
+      // Propagate top-level global fields across all outlet features
       if (extraGlobal && typeof extraGlobal === 'object') {
         const allowedGlobals = [
           'staffList', 'leaveRecords', 'dailyOvertime', 'weeklyOvertime', 'dailyAttendance',
-          'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'guestComplaints',
-          'affiliateHistory', 'manpowerData'
+          'dailyExternalAudit', 'dailyCPA', 'dailyGSI', 'guestComplaints', 'affiliateHistory',
+          'manpowerData', 'logisticItems', 'logisticBeginningStocks', 'dailyLogisticRecords',
+          'peminjamanRecords', 'logisticPeriodPrices', 'monthlyCogsData', 'customSuppliers',
+          'promoSettings', 'bankingPromos', 'dailyStrategy', 'dailyVoidBills',
+          'dailyComplimentaryLedger', 'dailyGuestSatisfaction', 'dailyCityLedger',
+          'dailyGasLedger', 'dailyChemicalLedger', 'dailyCommodityLedger',
+          'dailyMainStoreLedger', 'dailyMainKitchenLedger', 'dailyCashLedger',
+          'dailySukandaLedger', 'dailyTgifLedger', 'dailySaungKubilLedger',
+          'dailyEverestLedger', 'dailyIkigaiLedger', 'dailyPanfilaLedger',
+          'dailyKebunkuLedger', 'dailyTargets', 'dailySales', 'dailyRecording',
+          'googleReview', 'dailyGoogleReview', 'dailyQA', 'energyCost'
         ];
         allowedGlobals.forEach(gKey => {
           if (extraGlobal[gKey] !== undefined) {
-            existing[gKey] = extraGlobal[gKey];
+            const incomingGVal = extraGlobal[gKey];
+            if (
+              incomingGVal && typeof incomingGVal === 'object' && !Array.isArray(incomingGVal) &&
+              existing[gKey] && typeof existing[gKey] === 'object' && !Array.isArray(existing[gKey])
+            ) {
+              existing[gKey] = { ...existing[gKey], ...incomingGVal };
+            } else {
+              existing[gKey] = incomingGVal;
+            }
           }
         });
       }

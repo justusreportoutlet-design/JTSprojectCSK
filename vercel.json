@@ -1,0 +1,31 @@
+{
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/api/sync/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=5, stale-while-revalidate=15"
+        }
+      ]
+    },
+    {
+      "source": "/api/health",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=60"
+        }
+      ]
+    }
+  ]
+}

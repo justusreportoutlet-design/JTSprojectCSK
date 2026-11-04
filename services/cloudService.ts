@@ -641,12 +641,10 @@ export async function saveOutletData(
   // 1. Immediately save & synchronize to High-Availability Cloud Server API (instant cross-device sync)
   let serverSyncSuccess = false;
   try {
-    const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}?_t=${Date.now()}`, {
+    const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}`, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ data, email, extraGlobal })
     });
@@ -794,13 +792,7 @@ export async function fetchAllOutletsData(): Promise<Record<string, any> | null>
 
   // 1. Fetch from server-side sync API
   try {
-    const sRes = await fetch(`/api/sync/all-outlets?_t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
-      }
-    });
+    const sRes = await fetch('/api/sync/all-outlets');
     if (sRes.ok) {
       const sJson = await sRes.json();
       if (sJson.outlets && typeof sJson.outlets === 'object') {
@@ -866,19 +858,31 @@ export async function fetchAllOutletsData(): Promise<Record<string, any> | null>
 export function startAllOutletsListener(onUpdate: (data: Record<string, any>) => void) {
   let isSubscribed = true;
   let lastKnownHash = '';
+  let lastKnownEtag = '';
 
-  // Function to poll and sync from server API
+  // Function to poll and sync from server API with ETag & CDN efficiency
   const pollServerSync = async () => {
     if (!isSubscribed) return;
+    // Don't waste CDN requests if the tab is in the background
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
     try {
-      const res = await fetch(`/api/sync/all-outlets?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        }
-      });
+      const headers: Record<string, string> = {};
+      if (lastKnownEtag) {
+        headers['If-None-Match'] = lastKnownEtag;
+      }
+      const res = await fetch('/api/sync/all-outlets', { headers });
+      
+      // If 304 Not Modified, data is unchanged - 0 bytes downloaded, save bandwidth & compute
+      if (res.status === 304) {
+        return;
+      }
+
       if (res.ok) {
+        const etag = res.headers.get('ETag');
+        if (etag) lastKnownEtag = etag;
+
         const json = await res.json();
         if (json.outlets && typeof json.outlets === 'object') {
           const processed: Record<string, any> = {};
@@ -905,7 +909,17 @@ export function startAllOutletsListener(onUpdate: (data: Record<string, any>) =>
   };
 
   pollServerSync();
-  const pollInterval = setInterval(pollServerSync, 3500);
+  // Poll every 10 seconds (down from 3.5s) to save Vercel CDN request limits
+  const pollInterval = setInterval(pollServerSync, 10000);
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible' && isSubscribed) {
+      pollServerSync();
+    }
+  };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
 
   let unsubFirestore: (() => void) | null = null;
   if (checkQuota() && auth.currentUser) {
@@ -937,6 +951,9 @@ export function startAllOutletsListener(onUpdate: (data: Record<string, any>) =>
   const cleanup = () => {
     isSubscribed = false;
     clearInterval(pollInterval);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
     if (unsubFirestore) unsubFirestore();
   };
 
@@ -959,13 +976,7 @@ export function startRealtimeListener(
   const fetchData = async () => {
     if (!isSubscribed) return;
     try {
-      const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        }
-      });
+      const res = await fetch(`/api/sync/outlet/${encodeURIComponent(outletId)}`);
       if (res.ok) {
         const json = await res.json();
         if (json.outlet && isSubscribed) {

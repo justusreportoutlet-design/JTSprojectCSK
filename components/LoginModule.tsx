@@ -52,6 +52,8 @@ const LoginModule: React.FC<Props> = ({ onLogin, onPublicView, isFullScreen, onT
         setEmailInput(user.email);
         safeStorage.setItem('MANUAL_USER_EMAIL', user.email);
         safeStorage.setItem('BARN_USER_SESSION', user.email);
+      } else if (!user) {
+        setFirebaseUser(null);
       }
     });
     return unsub;
