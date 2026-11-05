@@ -510,6 +510,12 @@ export const SupplierExpenseModule: React.FC<Props> = ({
     setInputPrice('');
     setInputPic('');
     setInputReason('');
+
+    // Broadcast real-time purchasing update to Receiving Sheet and other modules
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('appPurchasingUpdated', { detail: { date: inputDate, supplier: targetSup.key, item: newItem } }));
+    }
+
     showToast?.(`Item "${newItem.name}" (${targetSup.label}) berhasil ditambahkan!`, 'success');
   };
 
@@ -572,6 +578,10 @@ export const SupplierExpenseModule: React.FC<Props> = ({
         }
       };
     }, undefined, true);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('appPurchasingUpdated', { detail: { date: inputDate, supplier: supKey, deletedId: itemId } }));
+    }
 
     showToast?.(`Item "${itemName}" dihapus.`, 'info');
   };

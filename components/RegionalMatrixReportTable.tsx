@@ -7,9 +7,9 @@ import { AppState, Outlet } from '../types';
 export interface RegionalMatrixReportProps {
   title: string;
   subtitle?: string;
-  badgeLabel: string;
-  icon: string;
-  themeColor: 'indigo' | 'emerald' | 'amber' | 'rose' | 'blue' | 'purple' | 'cyan' | 'teal';
+  badgeLabel?: string;
+  icon?: string;
+  themeColor?: 'indigo' | 'emerald' | 'amber' | 'rose' | 'blue' | 'purple' | 'cyan' | 'teal';
   allOutletsData: Record<string, any>;
   data?: AppState;
   selectedMonth: number;
@@ -25,6 +25,9 @@ export interface RegionalMatrixReportProps {
   // Format mode: 'CURRENCY' (Rp) | 'NUMBER' | 'RATING'
   valueType?: 'CURRENCY' | 'NUMBER' | 'RATING';
   initialViewMode?: 'HARIAN' | 'WEEKLY' | 'MONTHLY' | 'YTD' | 'COMPARE_WEEK' | 'COMPARE_MONTH' | 'COMPARE_LAST_WEEK' | 'COMPARE_LAST_MONTH';
+  moduleName?: string;
+  valueUnit?: string;
+  description?: string;
 }
 
 const MONTH_NAMES = [
@@ -35,9 +38,9 @@ const MONTH_NAMES = [
 export const RegionalMatrixReportTable: React.FC<RegionalMatrixReportProps> = ({
   title,
   subtitle,
-  badgeLabel,
-  icon,
-  themeColor,
+  badgeLabel = 'REGIONAL',
+  icon = 'fa-table',
+  themeColor = 'indigo',
   allOutletsData,
   data,
   selectedMonth,
@@ -49,7 +52,10 @@ export const RegionalMatrixReportTable: React.FC<RegionalMatrixReportProps> = ({
   extractDailyValue,
   extractDailyTxCount,
   valueType = 'CURRENCY',
-  initialViewMode
+  initialViewMode,
+  moduleName,
+  valueUnit,
+  description
 }) => {
   const resolveViewMode = (mode?: string): 'HARIAN' | 'WEEKLY' | 'MONTHLY' | 'YTD' | 'COMPARE_WEEK' | 'COMPARE_MONTH' => {
     if (mode === 'COMPARE_LAST_WEEK' || mode === 'COMPARE_WEEK') return 'COMPARE_WEEK';

@@ -754,24 +754,79 @@ export const CogsModule: React.FC<Props> = ({
     setPercepatanPercent(balance);
   };
 
+  // Real-time synchronization trigger across purchasing & sales modules
+  const [purchasingSyncTick, setPurchasingSyncTick] = useState(0);
+  useEffect(() => {
+    const handlePurchasingSync = () => setPurchasingSyncTick(t => t + 1);
+    window.addEventListener('appPurchasingUpdated', handlePurchasingSync);
+    window.addEventListener('dailyRevenueUpdated', handlePurchasingSync);
+    window.addEventListener('appSalesUpdated', handlePurchasingSync);
+    window.addEventListener('appDataSyncCompleted', handlePurchasingSync);
+    return () => {
+      window.removeEventListener('appPurchasingUpdated', handlePurchasingSync);
+      window.removeEventListener('dailyRevenueUpdated', handlePurchasingSync);
+      window.removeEventListener('appSalesUpdated', handlePurchasingSync);
+      window.removeEventListener('appDataSyncCompleted', handlePurchasingSync);
+    };
+  }, []);
+
   // Aggregated data source based on selectedOutlet
   const combinedState = useMemo(() => {
     const states: AppState[] = [];
+    const isCurrentFilterMonth = filterMonth !== undefined ? selectedMonth === parseInt(filterMonth, 10) : true;
+
+    const mergeWithLiveData = (base: any, live: any) => {
+      if (!live) return base;
+      if (!base) return live;
+      return {
+        ...base,
+        ...live,
+        dailyMainStoreLedger: { ...(base.dailyMainStoreLedger || {}), ...(live.dailyMainStoreLedger || {}) },
+        dailyMainKitchenLedger: { ...(base.dailyMainKitchenLedger || {}), ...(live.dailyMainKitchenLedger || {}) },
+        dailyCashLedger: { ...(base.dailyCashLedger || {}), ...(live.dailyCashLedger || {}) },
+        dailyCommodityLedger: { ...(base.dailyCommodityLedger || {}), ...(live.dailyCommodityLedger || {}) },
+        dailyChemicalLedger: { ...(base.dailyChemicalLedger || {}), ...(live.dailyChemicalLedger || {}) },
+        dailySukandaLedger: { ...(base.dailySukandaLedger || {}), ...(live.dailySukandaLedger || {}) },
+        dailyTgifLedger: { ...(base.dailyTgifLedger || {}), ...(live.dailyTgifLedger || {}) },
+        dailySaungKubilLedger: { ...(base.dailySaungKubilLedger || {}), ...(live.dailySaungKubilLedger || {}) },
+        dailyEverestLedger: { ...(base.dailyEverestLedger || {}), ...(live.dailyEverestLedger || {}) },
+        dailyIkigaiLedger: { ...(base.dailyIkigaiLedger || {}), ...(live.dailyIkigaiLedger || {}) },
+        dailyPanfilaLedger: { ...(base.dailyPanfilaLedger || {}), ...(live.dailyPanfilaLedger || {}) },
+        dailyKebunkuLedger: { ...(base.dailyKebunkuLedger || {}), ...(live.dailyKebunkuLedger || {}) },
+        dailyCustomSupplierLedgers: { ...(base.dailyCustomSupplierLedgers || {}), ...(live.dailyCustomSupplierLedgers || {}) },
+        expenses: { ...(base.expenses || {}), ...(live.expenses || {}) },
+        sales: { ...(base.sales || {}), ...(live.sales || {}) }
+      };
+    };
+
     if (selectedOutlet && selectedOutlet !== 'ALL') {
+      let baseState: any = null;
       if (allMonthlyData && (allMonthlyData as any)[selectedOutlet]) {
         const outletMap = (allMonthlyData as any)[selectedOutlet];
-        const m = outletMap[String(selectedMonth)] || outletMap[selectedMonth];
-        if (m) states.push(m as AppState);
-      } else if (data && (!data.outlet || data.outlet === selectedOutlet)) {
+        baseState = outletMap[String(selectedMonth)] || outletMap[selectedMonth] || null;
+      } else if (allMonthlyData && ((allMonthlyData as any)[String(selectedMonth)] || (allMonthlyData as any)[selectedMonth])) {
+        baseState = (allMonthlyData as any)[String(selectedMonth)] || (allMonthlyData as any)[selectedMonth] || null;
+      }
+
+      const isCurrentDataForOutlet = data && (!data.outlet || data.outlet === selectedOutlet);
+      if (isCurrentDataForOutlet && isCurrentFilterMonth && data) {
+        states.push(mergeWithLiveData(baseState, data) as AppState);
+      } else if (baseState) {
+        states.push(baseState as AppState);
+      } else if (data) {
         states.push(data);
       }
     } else {
       if (allMonthlyData) {
-        Object.entries(allMonthlyData).forEach(([_, outletVal]: [string, any]) => {
+        Object.entries(allMonthlyData).forEach(([outletKey, outletVal]: [string, any]) => {
           if (outletVal) {
             const m = outletVal[String(selectedMonth)] || outletVal[selectedMonth];
-            if (m) states.push(m as AppState);
-            else if (outletVal.sales || outletVal.expenses) states.push(outletVal as AppState);
+            if (m) {
+              const isLiveOutlet = data && data.outlet === outletKey && isCurrentFilterMonth;
+              states.push(isLiveOutlet ? (mergeWithLiveData(m, data) as AppState) : (m as AppState));
+            } else if (outletVal.sales || outletVal.expenses) {
+              states.push(outletVal as AppState);
+            }
           }
         });
       }
@@ -780,7 +835,7 @@ export const CogsModule: React.FC<Props> = ({
       }
     }
     return states;
-  }, [data, allMonthlyData, selectedOutlet, selectedMonth]);
+  }, [data, allMonthlyData, selectedOutlet, selectedMonth, filterMonth, purchasingSyncTick]);
 
   // Helper: Daily Revenue from Sales (with Lunch & Dinner breakdown)
   const getRevenueForDate = (dateStr: string): { 

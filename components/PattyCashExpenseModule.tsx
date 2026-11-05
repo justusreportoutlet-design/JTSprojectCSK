@@ -381,6 +381,12 @@ export const PattyCashExpenseModule: React.FC<Props> = ({
     setInputPrice('');
     setInputPic('');
     setInputReason('');
+
+    // Broadcast real-time purchasing update to Receiving Sheet and other modules
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('appPurchasingUpdated', { detail: { date: inputDate, category: targetCatDef.key, item: newItem } }));
+    }
+
     showToast?.(`Item "${newItem.name}" (${targetCatDef.label}) berhasil ditambahkan!`, 'success');
   };
 
@@ -432,6 +438,10 @@ export const PattyCashExpenseModule: React.FC<Props> = ({
         }
       };
     }, undefined, true);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('appPurchasingUpdated', { detail: { date: inputDate, category: targetCatDef.key, deletedId: itemId } }));
+    }
 
     showToast?.(`Item "${itemName}" dihapus.`, 'info');
   };

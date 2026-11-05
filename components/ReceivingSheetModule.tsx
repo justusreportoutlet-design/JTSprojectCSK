@@ -77,8 +77,55 @@ const ReceivingSheetModule: React.FC<Props> = ({
   selectedOutlet
 }) => {
   const currentDate = new Date();
-  const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth()); // 0-indexed
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    if (filters?.year) {
+      const y = Number(filters.year);
+      if (!isNaN(y) && y >= 2020) return y;
+    }
+    return currentDate.getFullYear();
+  });
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
+    if (filters?.month !== undefined && filters?.month !== null && filters?.month !== '') {
+      const m = Number(filters.month);
+      if (!isNaN(m) && m >= 0 && m <= 11) return m;
+    }
+    return currentDate.getMonth();
+  });
+
+  // Sync state if filters change from top navigation
+  useEffect(() => {
+    if (filters?.month !== undefined && filters?.month !== null && filters?.month !== '') {
+      const m = Number(filters.month);
+      if (!isNaN(m) && m >= 0 && m <= 11) {
+        setSelectedMonth(m);
+      }
+    }
+  }, [filters?.month]);
+
+  useEffect(() => {
+    if (filters?.year !== undefined && filters?.year !== null && filters?.year !== '') {
+      const y = Number(filters.year);
+      if (!isNaN(y) && y >= 2020) {
+        setSelectedYear(y);
+      }
+    }
+  }, [filters?.year]);
+
+  // Real-time synchronization trigger across all purchasing & sales modules
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    const handleSync = () => setRefreshTick(t => t + 1);
+    window.addEventListener('appPurchasingUpdated', handleSync);
+    window.addEventListener('dailyRevenueUpdated', handleSync);
+    window.addEventListener('appSalesUpdated', handleSync);
+    window.addEventListener('appDataSyncCompleted', handleSync);
+    return () => {
+      window.removeEventListener('appPurchasingUpdated', handleSync);
+      window.removeEventListener('dailyRevenueUpdated', handleSync);
+      window.removeEventListener('appSalesUpdated', handleSync);
+      window.removeEventListener('appDataSyncCompleted', handleSync);
+    };
+  }, []);
 
   // Modal / Viewing state for daily entries (Read-Only)
   const [viewingDayRow, setViewingDayRow] = useState<DailyReceivingRow | null>(null);
@@ -230,24 +277,61 @@ const ReceivingSheetModule: React.FC<Props> = ({
   // Monthly states collected based on selectedOutlet
   const monthlyStates = useMemo(() => {
     const list: AppState[] = [];
+    const isCurrentFilterMonth = filters?.month !== undefined ? selectedMonth === Number(filters.month) : true;
+
+    // Helper to merge live data into a month state so fresh inputs take precedence
+    const mergeWithLiveData = (base: any, live: any) => {
+      if (!live) return base;
+      if (!base) return live;
+      return {
+        ...base,
+        ...live,
+        dailyMainStoreLedger: { ...(base.dailyMainStoreLedger || {}), ...(live.dailyMainStoreLedger || {}) },
+        dailyMainKitchenLedger: { ...(base.dailyMainKitchenLedger || {}), ...(live.dailyMainKitchenLedger || {}) },
+        dailyCashLedger: { ...(base.dailyCashLedger || {}), ...(live.dailyCashLedger || {}) },
+        dailyCommodityLedger: { ...(base.dailyCommodityLedger || {}), ...(live.dailyCommodityLedger || {}) },
+        dailyChemicalLedger: { ...(base.dailyChemicalLedger || {}), ...(live.dailyChemicalLedger || {}) },
+        dailySukandaLedger: { ...(base.dailySukandaLedger || {}), ...(live.dailySukandaLedger || {}) },
+        dailyTgifLedger: { ...(base.dailyTgifLedger || {}), ...(live.dailyTgifLedger || {}) },
+        dailySaungKubilLedger: { ...(base.dailySaungKubilLedger || {}), ...(live.dailySaungKubilLedger || {}) },
+        dailyEverestLedger: { ...(base.dailyEverestLedger || {}), ...(live.dailyEverestLedger || {}) },
+        dailyIkigaiLedger: { ...(base.dailyIkigaiLedger || {}), ...(live.dailyIkigaiLedger || {}) },
+        dailyPanfilaLedger: { ...(base.dailyPanfilaLedger || {}), ...(live.dailyPanfilaLedger || {}) },
+        dailyKebunkuLedger: { ...(base.dailyKebunkuLedger || {}), ...(live.dailyKebunkuLedger || {}) },
+        dailyCustomSupplierLedgers: { ...(base.dailyCustomSupplierLedgers || {}), ...(live.dailyCustomSupplierLedgers || {}) },
+        expenses: { ...(base.expenses || {}), ...(live.expenses || {}) },
+        sales: { ...(base.sales || {}), ...(live.sales || {}) }
+      };
+    };
+
     if (selectedOutlet && selectedOutlet !== 'ALL') {
+      let baseMonthState: any = null;
       if (allMonthlyData && (allMonthlyData as any)[selectedOutlet]) {
         const outletMap = (allMonthlyData as any)[selectedOutlet];
-        const m = outletMap[String(selectedMonth)] || outletMap[selectedMonth];
-        if (m) list.push(m);
+        baseMonthState = outletMap[String(selectedMonth)] || outletMap[selectedMonth] || null;
       } else if (allMonthlyData && ((allMonthlyData as any)[String(selectedMonth)] || (allMonthlyData as any)[selectedMonth])) {
-        const m = (allMonthlyData as any)[String(selectedMonth)] || (allMonthlyData as any)[selectedMonth];
-        if (m) list.push(m);
-      } else if (data && (!data.outlet || data.outlet === selectedOutlet)) {
+        baseMonthState = (allMonthlyData as any)[String(selectedMonth)] || (allMonthlyData as any)[selectedMonth] || null;
+      }
+
+      const isCurrentDataForOutlet = data && (!data.outlet || data.outlet === selectedOutlet);
+      if (isCurrentDataForOutlet && isCurrentFilterMonth && data) {
+        list.push(mergeWithLiveData(baseMonthState, data));
+      } else if (baseMonthState) {
+        list.push(baseMonthState);
+      } else if (data) {
         list.push(data);
       }
     } else {
       if (allMonthlyData) {
-        Object.entries(allMonthlyData).forEach(([_, outletVal]: [string, any]) => {
+        Object.entries(allMonthlyData).forEach(([outletKey, outletVal]: [string, any]) => {
           if (outletVal) {
             const m = outletVal[String(selectedMonth)] || outletVal[selectedMonth];
-            if (m) list.push(m);
-            else if (outletVal.sales || outletVal.expenses || outletVal.dailyMainStoreLedger || outletVal.dailyChemicalLedger) list.push(outletVal);
+            if (m) {
+              const isLiveOutlet = data && data.outlet === outletKey && isCurrentFilterMonth;
+              list.push(isLiveOutlet ? mergeWithLiveData(m, data) : m);
+            } else if (outletVal.sales || outletVal.expenses || outletVal.dailyMainStoreLedger || outletVal.dailyChemicalLedger) {
+              list.push(outletVal);
+            }
           }
         });
       }
@@ -256,7 +340,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
       }
     }
     return list;
-  }, [selectedOutlet, allMonthlyData, selectedMonth, data]);
+  }, [selectedOutlet, allMonthlyData, selectedMonth, data, filters?.month, refreshTick]);
 
   // Combined daily data calculation for the selected month & year
   const dailyRows = useMemo(() => {
@@ -380,7 +464,7 @@ const ReceivingSheetModule: React.FC<Props> = ({
               });
             }
           } else if (sup.id === 'mainStore') {
-            const storeList = (st.dailyMainStoreLedger?.[dateStr] || (st as any).dailyMainStore?.[dateStr]) as LedgerItem[];
+            const storeList = ((st.dailyMainStoreLedger?.[dateStr] || (st as any).dailyMainStore?.[dateStr])) as LedgerItem[];
             if (Array.isArray(storeList)) {
               storeList.forEach(it => {
                 const k = it.id || `${it.name}_${it.qty}_${it.price}`;
@@ -390,9 +474,23 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 }
               });
             }
+          } else if (sup.id === 'mainKitchen') {
+            const kitchenList = ((st.dailyMainKitchenLedger?.[dateStr] || (st as any).dailyMainKitchen?.[dateStr])) as LedgerItem[];
+            if (Array.isArray(kitchenList)) {
+              kitchenList.forEach(it => {
+                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+                if (!seenItemKeys.has(k)) {
+                  seenItemKeys.add(k);
+                  collectedItems.push(it);
+                }
+              });
+            }
           } else if (sup.isCustom) {
             // Check custom supplier ledgers: prioritize dailyCustomSupplierLedgers, fallback to key, deduplicate strictly
-            const custItems = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
+            const custItems = ((st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] || 
+                               (st as any).dailyCustomSupplierLedgers?.[sup.key]?.[dateStr] ||
+                               (st as any)[sup.key]?.[dateStr] ||
+                               (st as any)[sup.id]?.[dateStr]) as LedgerItem[];
             if (Array.isArray(custItems) && custItems.length > 0) {
               custItems.forEach(it => {
                 const k = it.id || `${it.name}_${it.qty}_${it.price}`;
@@ -401,20 +499,15 @@ const ReceivingSheetModule: React.FC<Props> = ({
                   collectedItems.push(it);
                 }
               });
-            } else {
-              const keyItems = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-              if (Array.isArray(keyItems) && keyItems.length > 0) {
-                keyItems.forEach(it => {
-                  const k = it.id || `${it.name}_${it.qty}_${it.price}`;
-                  if (!seenItemKeys.has(k)) {
-                    seenItemKeys.add(k);
-                    collectedItems.push(it);
-                  }
-                });
-              }
             }
           } else {
-            const ledgerList = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
+            // Core suppliers (saungKubil, tgif, panfila, everest, sukanda, ikigai, kebunku)
+            const ledgerList = ((st as any)[sup.key]?.[dateStr] || 
+                                (st as any)[`daily${sup.id.charAt(0).toUpperCase() + sup.id.slice(1)}Ledger`]?.[dateStr] ||
+                                (st as any)[`daily_${sup.id}_ledger`]?.[dateStr] ||
+                                (st as any)[`daily${sup.id.charAt(0).toUpperCase() + sup.id.slice(1)}`]?.[dateStr] ||
+                                (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] ||
+                                (st as any).dailyCustomSupplierLedgers?.[sup.key]?.[dateStr]) as LedgerItem[];
             if (Array.isArray(ledgerList)) {
               ledgerList.forEach(it => {
                 const k = it.id || `${it.name}_${it.qty}_${it.price}`;
@@ -445,6 +538,8 @@ const ReceivingSheetModule: React.FC<Props> = ({
                 val = Number(exp.mainStore) || 0;
                 grossMainStoreForDay = val;
                 val = Math.max(0, val - totalDeductionsForDay);
+              } else if (sup.id === 'mainKitchen') {
+                val = Number(exp.mainKitchen) || 0;
               } else if (sup.isCustom) {
                 val = Number((exp as any)[sup.id] || (exp as any)[sup.key]) || 0;
               } else {
@@ -740,24 +835,40 @@ const ReceivingSheetModule: React.FC<Props> = ({
               if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
             });
           }
+        } else if (sup.id === 'mainStore') {
+          const sList = ((st.dailyMainStoreLedger?.[dateStr] || (st as any).dailyMainStore?.[dateStr])) as LedgerItem[];
+          if (Array.isArray(sList)) {
+            sList.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          }
+        } else if (sup.id === 'mainKitchen') {
+          const kList = ((st.dailyMainKitchenLedger?.[dateStr] || (st as any).dailyMainKitchen?.[dateStr])) as LedgerItem[];
+          if (Array.isArray(kList)) {
+            kList.forEach(it => {
+              const k = it.id || `${it.name}_${it.qty}_${it.price}`;
+              if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
+            });
+          }
         } else if (sup.isCustom) {
-          const c1 = (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] as LedgerItem[];
+          const c1 = ((st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] || 
+                     (st as any).dailyCustomSupplierLedgers?.[sup.key]?.[dateStr] ||
+                     (st as any)[sup.key]?.[dateStr] ||
+                     (st as any)[sup.id]?.[dateStr]) as LedgerItem[];
           if (Array.isArray(c1) && c1.length > 0) {
             c1.forEach(it => {
               const k = it.id || `${it.name}_${it.qty}_${it.price}`;
               if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
             });
-          } else {
-            const c2 = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
-            if (Array.isArray(c2)) {
-              c2.forEach(it => {
-                const k = it.id || `${it.name}_${it.qty}_${it.price}`;
-                if (!seenItemKeys.has(k)) { seenItemKeys.add(k); list.push(it); }
-              });
-            }
           }
         } else {
-          const l = (st as any)[sup.key]?.[dateStr] as LedgerItem[];
+          const l = ((st as any)[sup.key]?.[dateStr] || 
+                     (st as any)[`daily${sup.id.charAt(0).toUpperCase() + sup.id.slice(1)}Ledger`]?.[dateStr] ||
+                     (st as any)[`daily_${sup.id}_ledger`]?.[dateStr] ||
+                     (st as any)[`daily${sup.id.charAt(0).toUpperCase() + sup.id.slice(1)}`]?.[dateStr] ||
+                     (st as any).dailyCustomSupplierLedgers?.[sup.id]?.[dateStr] ||
+                     (st as any).dailyCustomSupplierLedgers?.[sup.key]?.[dateStr]) as LedgerItem[];
           if (Array.isArray(l)) {
             l.forEach(it => {
               const k = it.id || `${it.name}_${it.qty}_${it.price}`;
