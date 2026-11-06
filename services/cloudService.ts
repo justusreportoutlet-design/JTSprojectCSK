@@ -199,10 +199,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(jsonError);
 }
 
-// CRITICAL: Call getDocFromServer to test connection on boot
+// CRITICAL: Test connection on boot without hanging or triggering 10s backend timeouts
 export async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    const testPromise = getDoc(doc(db, 'test', 'connection'));
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Connection test timeout')), 4000)
+    );
+    await Promise.race([testPromise, timeoutPromise]);
     console.info('[CloudSync] Firebase connection test succeeded. Clearing quota exceeded state if any.');
     resetQuotaExceeded();
   } catch (error) {

@@ -14,17 +14,17 @@ const firebaseConfig = {
   authDomain: "christian-project-3cf5c.firebaseapp.com",
   projectId: "christian-project-3cf5c",
   storageBucket: "christian-project-3cf5c.firebasestorage.app",
-  messagingSenderId: "701163493761",
-  appId: "1:701163493761:web:83e345b69404d9bf87de972",
-  measurementId: "G-7K9YKDSMQB"
+  messagingSenderId: "701163493751",
+  appId: "1:701163493751:web:83e345b694049db5fde972",
+  measurementId: "G-7K9YKDSNQB"
 };
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// VERSI IRIT 1000 BROWSER - ANTI LELET
 let firestoreDb: any;
 try {
   firestoreDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager(),
       cacheSizeBytes: CACHE_SIZE_UNLIMITED
@@ -32,11 +32,12 @@ try {
   });
 } catch {
   try {
-    firestoreDb = getFirestore(app);
-  } catch {
     firestoreDb = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
       localCache: memoryLocalCache()
     });
+  } catch {
+    firestoreDb = getFirestore(app);
   }
 }
 
