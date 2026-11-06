@@ -4,6 +4,7 @@ import html2pdf from 'html2pdf.js';
 import { AppState, LogisticItem, DailyLogisticRecord, PeminjamanRecord } from '../types';
 import { getOrderScheduleForOutlet } from '../constants';
 import FeatureSubmitSyncButton from './FeatureSubmitSyncButton';
+import LogisticsExcelUploadModal from './LogisticsExcelUploadModal';
 
 // Helper functions for Cut-off (Tanggal 1 - Akhir Bulan)
 export interface PeriodInfo {
@@ -120,8 +121,24 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
   const [showStockOpnameModal, setShowStockOpnameModal] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [resetType, setResetType] = useState<'INPUT_ONLY' | 'ALL'>('INPUT_ONLY');
+  const [showUploadExcelModal, setShowUploadExcelModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+
+  const handleApplyExcelImport = (
+    finalItems: LogisticItem[],
+    updatedPeriodPrices: Record<string, Record<string, number>>,
+    summary: { added: number; updated: number }
+  ) => {
+    onUpdate({
+      logisticItems: finalItems,
+      logisticPeriodPrices: updatedPeriodPrices
+    }, true);
+    showToast(
+      `Berhasil mengimpor data Excel: ${summary.added} barang baru ditambahkan, ${summary.updated} harga satuan diperbarui!`,
+      'success'
+    );
+  };
 
   const handleSubmitLogistics = async () => {
     setIsSubmitting(true);
@@ -632,6 +649,15 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
             Tambah Item Baru
           </button>
           <button
+            type="button"
+            onClick={() => setShowUploadExcelModal(true)}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/50 hover:to-teal-600/50 text-emerald-300 hover:text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2 border border-emerald-500/40 shadow-lg shadow-emerald-950/25 cursor-pointer"
+            title="Upload Data Nama Barang dan Harga Satuan via file Excel (.xlsx)"
+          >
+            <i className="fas fa-file-excel text-emerald-400"></i>
+            Upload by Excel
+          </button>
+          <button
             onClick={() => setShowStockOpnameModal(true)}
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2 border border-emerald-400/20 shadow-lg shadow-emerald-950/25"
           >
@@ -1099,10 +1125,19 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
           <div className="space-y-6 animate-fade-in">
             {/* Price Change Grid / Table */}
             <div className="glass-card rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
-              <div className="p-4 bg-slate-950/40 border-b border-white/5 flex justify-between items-center">
+              <div className="p-4 bg-slate-950/40 border-b border-white/5 flex flex-wrap justify-between items-center gap-3">
                 <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">
                   REKAPAN PERUBAHAN HARGA LOGISTIK ANTAR PERIODE DAN SELISIHNYA
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setShowUploadExcelModal(true)}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                  title="Upload perubahan harga satuan via file Excel"
+                >
+                  <i className="fas fa-file-excel text-emerald-400"></i>
+                  Upload Excel Harga
+                </button>
               </div>
 
               <div className="p-6">
@@ -1285,15 +1320,28 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAddItemModal(false)}
-                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider"
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-wider"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-wider cursor-pointer"
                 >
                   Simpan Item
+                </button>
+              </div>
+
+              <div className="pt-3 border-t border-white/5 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddItemModal(false);
+                    setShowUploadExcelModal(true);
+                  }}
+                  className="text-[10px] text-emerald-400 hover:text-emerald-300 font-black uppercase tracking-wider flex items-center justify-center gap-1.5 mx-auto transition-all cursor-pointer"
+                >
+                  <i className="fas fa-file-excel"></i> Ingin input banyak barang? Upload via Excel
                 </button>
               </div>
             </form>
@@ -1741,6 +1789,18 @@ export const LogisticsModule: React.FC<LogisticsModuleProps> = ({
           onClose={() => setShowStockOpnameModal(false)}
         />
       )}
+
+      {/* Modal Upload Data Barang & Harga by Excel */}
+      <LogisticsExcelUploadModal
+        isOpen={showUploadExcelModal}
+        onClose={() => setShowUploadExcelModal(false)}
+        existingItems={items}
+        currentPeriod={currentPeriod}
+        logisticPeriodPrices={data.logisticPeriodPrices || {}}
+        selectedDate={selectedDate}
+        onApply={handleApplyExcelImport}
+        showToast={showToast}
+      />
     </div>
   );
 };
