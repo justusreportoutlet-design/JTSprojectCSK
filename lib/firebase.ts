@@ -21,23 +21,34 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
+// Explicitly target the "(default)" Firestore database
+export const FIRESTORE_DATABASE_ID = "(default)";
+
 let firestoreDb: any;
 try {
-  firestoreDb = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-      cacheSizeBytes: CACHE_SIZE_UNLIMITED
-    })
-  });
+  firestoreDb = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED
+      })
+    },
+    FIRESTORE_DATABASE_ID
+  );
 } catch {
   try {
-    firestoreDb = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      localCache: memoryLocalCache()
-    });
+    firestoreDb = initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+        localCache: memoryLocalCache()
+      },
+      FIRESTORE_DATABASE_ID
+    );
   } catch {
-    firestoreDb = getFirestore(app);
+    firestoreDb = getFirestore(app, FIRESTORE_DATABASE_ID);
   }
 }
 
